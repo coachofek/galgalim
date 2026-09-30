@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>גלגלים על גלגלים</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1419">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="גלגלים">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#0f1419;--panel:#161c24;--panel-2:#1d252f;--line:#2a3441;--txt:#e8edf3;--muted:#8b98a8;
+ --free:#22c55e;--busy:#f59e0b;--off:#5b6773;--accent:#3b82f6;--gold:#eab308;--violet:#8b5cf6;--red:#ef4444}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#0a0d11;color:var(--txt);font-family:"Segoe UI",system-ui,Arial,sans-serif;
+ display:grid;place-items:center;min-height:100vh}
+#phone{width:390px;height:800px;max-height:100vh;background:var(--bg);position:relative;overflow:hidden;
+ border-radius:32px;border:1px solid var(--line);box-shadow:0 24px 70px rgba(0,0,0,.6);display:flex;flex-direction:column}
+@media(max-width:430px),(max-height:820px){#phone{width:100vw;height:100vh;border-radius:0;border:0}}
+.scr{flex:1;display:none;flex-direction:column;overflow:hidden}.scr.on{display:flex}
+.body{flex:1;overflow-y:auto;padding:14px;-webkit-overflow-scrolling:touch}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:13px 15px;
+ background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.topbar .who{display:flex;align-items:center;gap:10px;min-width:0}
+.topbar .av{width:38px;height:38px;border-radius:50%;background:var(--panel-2);border:2px solid var(--line);
+ display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.topbar .nm{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .sb{font-size:11px;color:var(--muted)}
+.iconbtn{background:var(--panel-2);border:1px solid var(--line);color:var(--txt);width:34px;height:34px;
+ border-radius:9px;cursor:pointer;font-size:14px;flex:none}
+.nav{display:flex;background:var(--panel);border-top:1px solid var(--line);flex:none;padding-bottom:env(safe-area-inset-bottom)}
+.nav button{flex:1;background:none;border:0;color:var(--muted);padding:9px 0 11px;font-family:inherit;
+ font-size:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative}
+.nav button .ic{font-size:18px}.nav button.on{color:var(--accent)}
+.nav button .bdg{position:absolute;top:4px;inset-inline-end:22%;background:var(--red);color:#fff;
+ border-radius:999px;font-size:9px;padding:0 5px;font-weight:700}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:11px}
+.card h4{margin:0 0 10px;font-size:13px;color:var(--muted);font-weight:600}
+.mut{color:var(--muted)}.big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.money{color:var(--free);font-weight:700;font-variant-numeric:tabular-nums}.center{text-align:center}
+.empty{padding:30px 16px;text-align:center;color:var(--muted);font-size:13px;line-height:1.7}
+.btn{width:100%;padding:14px;border-radius:12px;border:0;font-size:15px;font-weight:700;cursor:pointer;
+ font-family:inherit;margin-top:8px}
+.btn.p{background:var(--accent);color:#fff}.btn.ok{background:var(--free);color:#04240f}
+.btn.g{background:var(--gold);color:#241f00}.btn.v{background:var(--violet);color:#fff}
+.btn.no{background:var(--red);color:#fff}
+.btn.d{background:rgba(239,68,68,.14);color:#f87171;border:1px solid rgba(239,68,68,.4)}
+.btn.s{background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
+.btn:disabled{opacity:.5}.btn.sm{padding:9px;font-size:12.5px;border-radius:9px;margin-top:0}
+.rowbtns{display:flex;gap:8px;margin-top:10px}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+input,select,textarea{width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+ padding:12px;color:var(--txt);font-size:15px;font-family:inherit}
+textarea{min-height:74px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+.fld{margin-bottom:11px}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.badge{font-size:11px;padding:3px 10px;border-radius:999px;display:inline-block}
+.badge.free{background:rgba(34,197,94,.15);color:var(--free)}
+.badge.busy{background:rgba(245,158,11,.15);color:var(--busy)}
+.badge.off{background:rgba(91,103,115,.2);color:var(--off)}
+.badge.pend{background:rgba(234,179,8,.16);color:var(--gold)}
+/* התחברות */
+#auth .body{display:flex;flex-direction:column;justify-content:center;padding:26px}
+.logo{width:74px;height:74px;border-radius:20px;margin:0 auto 16px;
+ background:linear-gradient(135deg,#3b82f6,#22c55e);display:grid;place-items:center;font-size:38px}
+#auth h1{text-align:center;font-size:21px;margin:0 0 5px}
+#auth .sub{text-align:center;color:var(--muted);font-size:13px;margin-bottom:22px}
+.err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;border-radius:10px;
+ padding:11px;font-size:12.5px;margin-bottom:12px;display:none;line-height:1.6}
+.err.on{display:block}
+.link{text-align:center;margin-top:14px;font-size:13px;color:var(--accent);cursor:pointer}
+.seg{display:flex;background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:3px;margin-bottom:16px}
+.seg button{flex:1;background:none;border:0;color:var(--muted);padding:9px;border-radius:8px;
+ font-size:13px;font-family:inherit;cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff;font-weight:700}
+/* נהג */
+.statusbox{text-align:center;padding:20px 14px}
+.statusbox .lamp{width:74px;height:74px;border-radius:50%;margin:0 auto 12px;display:grid;place-items:center;font-size:32px}
+.lamp.free{background:rgba(34,197,94,.14);border:2px solid var(--free)}
+.lamp.busy{background:rgba(245,158,11,.14);border:2px solid var(--busy)}
+.lamp.off{background:rgba(91,103,115,.16);border:2px solid var(--off)}
+.statusbox .st{font-size:18px;font-weight:700}
+.statusbox .ex{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.6}
+.offer{background:linear-gradient(160deg,#2a2410,#161c24);border:2px solid var(--gold);border-radius:16px;
+ padding:15px;margin-bottom:12px}
+.offer .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
+.offer .kind{font-size:11.5px;font-weight:700;color:var(--gold)}
+.offer .cd{font-size:12px;font-weight:700;color:var(--gold)}
+.leg{display:flex;gap:9px;margin-bottom:8px}
+.leg .pin{font-size:14px;flex:none;width:18px;text-align:center}
+.leg .txt{font-size:13.5px;line-height:1.45}.leg .lb{font-size:10.5px;color:var(--muted);display:block}
+.offer .amt{text-align:center;font-size:23px;font-weight:700;color:var(--free);margin:12px 0 4px}
+.offer .pay{text-align:center;font-size:11.5px;color:var(--muted)}
+.msg{background:var(--panel);border:1px solid var(--line);border-inline-start:3px solid var(--accent);
+ border-radius:12px;padding:12px;margin-bottom:9px}
+.msg.bid{border-inline-start-color:var(--gold)}.msg.sent{border-inline-start-color:var(--free)}
+.msg.rl{border-inline-start-color:var(--red);background:rgba(239,68,68,.05)}
+.msg .mt{font-size:10.5px;color:var(--muted);margin-bottom:5px}.msg .mb{font-size:13.5px;line-height:1.6}
+/* מנהל */
+.stats2{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:11px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 13px;position:relative;overflow:hidden}
+.stat::before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:3px;background:var(--c)}
+.stat .n{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat .l{font-size:11px;color:var(--muted);margin-top:2px}
+#map-slot{margin-bottom:11px}
+#mmap{position:relative;height:300px;border-radius:12px;overflow:hidden;border:1px solid var(--line);
+ background:#0c1218;z-index:1}
+#mmap.fs{position:fixed;inset:0;height:auto;border-radius:0;border:0;z-index:100}
+#fs-exit{position:fixed;top:12px;inset-inline-start:12px;z-index:101;display:none;background:var(--panel);
+ border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:9px 14px;font-size:13px;
+ font-weight:700;font-family:inherit;cursor:pointer}
+#fs-exit.on{display:block}
+.pin2{display:flex;align-items:center;gap:4px;white-space:nowrap;transform:translate(-7px,-7px)}
+.pin2 .pd{width:13px;height:13px;border-radius:50%;border:2px solid #0c1218;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.pin2.free .pd{background:#22c55e}.pin2.busy .pd{background:#f59e0b}.pin2.off .pd{background:#5b6773}
+.pin2 .pl{background:rgba(12,18,24,.82);color:#e8edf3;font-size:10px;padding:1px 5px;border-radius:5px;
+ border:1px solid rgba(255,255,255,.14)}
+.leaflet-container{background:#0c1218;font-family:inherit}
+.leaflet-control-attribution{font-size:8px;background:rgba(12,18,24,.7)!important;color:#7d8b9c!important}
+.tripmark{background:rgba(12,18,24,.85);border:1px solid rgba(255,255,255,.2);border-radius:5px;
+ font-size:10px;padding:1px 5px;color:#e8edf3;white-space:nowrap}
+.mapbar{display:flex;gap:6px;align-items:center;margin-bottom:7px;flex-wrap:wrap}
+.mapbar button,.chips button{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
+ white-space:nowrap;padding:6px 12px;border-radius:999px;font-size:12px;font-family:inherit;cursor:pointer}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:9px}.chips button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.drow{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);
+ border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.drow .av{width:36px;height:36px;border-radius:50%;background:var(--panel-2);border:2px solid var(--line);
+ display:grid;place-items:center;font-size:11px;font-weight:700;flex:none}
+.drow .i{flex:1;min-width:0}
+.drow .n1{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px}
+.code{font-size:10px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
+ border-radius:5px;padding:1px 5px}
+.drow .n2,.drow .n3{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.drow .n3{color:#9fb0c4}
+.ent{background:var(--panel);border:1px solid var(--line);border-inline-start:3px solid var(--violet);
+ border-radius:12px;padding:12px;margin-bottom:9px}
+.ent.pend{border-inline-start-color:var(--gold);background:rgba(234,179,8,.05)}
+.ent.rel{border-inline-start-color:var(--red)}
+.ent .tm{font-size:14px;font-weight:700;color:var(--violet)}
+.ent .ti{font-size:13.5px;font-weight:600;margin-top:3px}
+.ent .nt{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.55}
+.ent .ea{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.ent .ea button{flex:1;min-width:76px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
+ border-radius:8px;padding:7px 4px;font-size:11.5px;font-family:inherit;cursor:pointer}
+.ent .ea button.ok{border-color:rgba(34,197,94,.45);color:var(--free)}
+.ent .ea button.mv{border-color:rgba(234,179,8,.45);color:var(--gold)}
+.priv{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.28);border-radius:10px;
+ padding:10px 12px;font-size:11.5px;color:var(--muted);line-height:1.65;margin-bottom:11px}
+.calnav{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.calnav .m{font-size:14px;font-weight:700}
+.calnav button{background:var(--panel-2);border:1px solid var(--line);color:var(--txt);width:32px;height:32px;
+ border-radius:9px;font-size:15px;font-family:inherit;cursor:pointer}
+.cgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:14px}
+.cgrid .dw{text-align:center;font-size:10px;color:var(--muted);padding:3px 0}
+.cd{aspect-ratio:1;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;display:flex;
+ flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;cursor:pointer}
+.cd.out{opacity:.25}.cd.today{border-color:var(--accent)}.cd.sel{background:#2a2145;border-color:var(--violet)}
+.cd .pips{display:flex;gap:2px}.cd .pip{width:4px;height:4px;border-radius:50%;background:var(--violet)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:right;color:var(--muted);font-size:10.5px;font-weight:600;padding:7px 6px;border-bottom:1px solid var(--line)}
+td{padding:7px 6px;border-bottom:1px solid var(--line)}
+.sumrow td{background:var(--panel-2);font-weight:700}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);
+ padding:10px 4px;font-size:12.5px;font-family:inherit;cursor:pointer}
+.tabs button.on{color:var(--txt);border-bottom-color:var(--accent)}
+.sheet{position:absolute;inset:0;background:rgba(0,0,0,.6);display:none;z-index:40;align-items:flex-end}
+.sheet.on{display:flex}
+.sheet .inner{background:var(--panel);border-top:1px solid var(--line);border-radius:20px 20px 0 0;width:100%;
+ max-height:92%;display:flex;flex-direction:column}
+.sheet h3{margin:0;padding:15px;border-bottom:1px solid var(--line);font-size:15px;
+ display:flex;justify-content:space-between;align-items:center}
+.sheet .sb2{padding:15px;overflow-y:auto}
+.sheet .sf{padding:12px 15px;border-top:1px solid var(--line);display:flex;gap:8px}
+.sheet .sf .btn{margin-top:0}
+.x{background:none;border:0;color:var(--muted);font-size:21px;cursor:pointer;padding:0 4px}
+#toast{position:absolute;bottom:78px;inset-inline:14px;background:var(--free);color:#04240f;padding:12px 15px;
+ border-radius:11px;font-size:13px;font-weight:600;text-align:center;z-index:60;transform:translateY(160px);
+ transition:transform .3s;line-height:1.5}
+#toast.on{transform:translateY(0)}
+#splash{position:absolute;inset:0;background:var(--bg);display:grid;place-items:center;z-index:200}
+.pinbox{background:var(--panel-2);border:2px dashed var(--gold);border-radius:12px;padding:14px;text-align:center;margin-top:12px}
+.pinbox .p{font-size:30px;font-weight:800;letter-spacing:5px;color:var(--gold);font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div id="phone">
+
+  <!-- ===== התחברות ===== -->
+  <div class="scr on" id="scr-auth">
+    <div class="body" id="auth">
+      <div class="logo">🚚</div>
+      <h1>גלגלים על גלגלים</h1>
+      <div class="sub" id="au-sub">התחברות למערכת</div>
+      <div class="err" id="au-err"></div>
+      <div class="seg">
+        <button class="on" id="sg-in" onclick="authMode('in')">התחברות</button>
+        <button id="sg-up" onclick="authMode('up')">הרשמה</button>
+      </div>
+      <div class="fld"><label>אימייל</label><input id="au-email" type="email" autocomplete="username" placeholder="name@example.com"></div>
+      <div class="fld"><label>סיסמה</label><input id="au-pass" type="password" autocomplete="current-password" placeholder="לפחות 6 תווים"></div>
+      <div id="up-only" style="display:none">
+        <div class="fld"><label>מי אתה?</label><select id="au-role">
+          <option value="driver">נהג — יש לי קוד חיבור מהמנהל</option>
+          <option value="owner">בעל צי — אני מנהל את הנהגים</option>
+        </select></div>
+      </div>
+      <button class="btn p" id="au-go" onclick="doAuth()">התחבר</button>
+    </div>
+  </div>
+
+  <!-- ===== חיבור נהג בקוד ===== -->
+  <div class="scr" id="scr-claim">
+    <div class="body" style="display:flex;flex-direction:column;justify-content:center;padding:26px">
+      <div class="logo">🔑</div>
+      <h1 style="text-align:center;font-size:20px;margin:0 0 6px">חיבור לצי</h1>
+      <div class="sub" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px">
+        הזן את קוד החיבור בן 6 הספרות שקיבלת מהמנהל</div>
+      <div class="err" id="cl-err"></div>
+      <div class="fld"><input id="cl-pin" inputmode="numeric" maxlength="6" placeholder="000000"
+        style="text-align:center;font-size:26px;letter-spacing:8px;font-weight:700"></div>
+      <button class="btn p" onclick="doClaim()">חבר אותי</button>
+      <button class="btn s" onclick="signOut()">התנתק</button>
+    </div>
+  </div>
+
+  <!-- ===== יצירת צי ===== -->
+  <div class="scr" id="scr-fleet">
+    <div class="body" style="display:flex;flex-direction:column;justify-content:center;padding:26px">
+      <div class="logo">🚕</div>
+      <h1 style="text-align:center;font-size:20px;margin:0 0 6px">הקמת הצי שלך</h1>
+      <div class="sub" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px">
+        פעם אחת בלבד. אחר כך תוסיף נהגים.</div>
+      <div class="err" id="fl-err"></div>
+      <div class="fld"><label>שם הצי</label><input id="fl-name" placeholder="לדוגמה: מוניות ירושלים"></div>
+      <button class="btn p" onclick="doCreateFleet()">צור צי</button>
+      <button class="btn s" onclick="signOut()">התנתק</button>
+    </div>
+  </div>
+
+  <!-- ===== נהג ===== -->
+  <div class="scr" id="scr-driver">
+    <div class="topbar">
+      <div class="who"><div class="av" id="dv-av"></div>
+        <div><div class="nm" id="dv-name"></div><div class="sb" id="dv-sub"></div></div></div>
+      <button class="iconbtn" onclick="signOut()">⏻</button>
+    </div>
+    <div class="body" id="dv-body"></div>
+    <div class="nav" id="dv-nav">
+      <button class="on" data-p="home" onclick="dvTab('home')"><span class="ic">🏠</span>ראשי
+        <span class="bdg" id="dv-b-home" style="display:none"></span></button>
+      <button data-p="trips" onclick="dvTab('trips')"><span class="ic">🧾</span>הנסיעות שלי</button>
+      <button data-p="msgs" onclick="dvTab('msgs')"><span class="ic">✉️</span>הודעות
+        <span class="bdg" id="dv-b-msgs" style="display:none"></span></button>
+    </div>
+  </div>
+
+  <!-- ===== בעלים ===== -->
+  <div class="scr" id="scr-owner">
+    <div class="topbar">
+      <div class="who">
+        <div class="av" style="background:linear-gradient(135deg,#3b82f6,#22c55e);border:0">👑</div>
+        <div><div class="nm" id="ow-name">מרכז שליטה</div><div class="sb" id="ow-sub"></div></div></div>
+      <button class="iconbtn" onclick="openBroadcast()">📣</button>
+      <button class="iconbtn" onclick="signOut()">⏻</button>
+    </div>
+    <div class="body" id="ow-body"></div>
+    <div class="nav" id="ow-nav">
+      <button class="on" data-p="map" onclick="owTab('map')"><span class="ic">🗺</span>מפה
+        <span class="bdg" id="ow-b-map" style="display:none"></span></button>
+      <button data-p="drivers" onclick="owTab('drivers')"><span class="ic">👥</span>נהגים</button>
+      <button data-p="today" onclick="owTab('today')"><span class="ic">📋</span>היום
+        <span class="bdg" id="ow-b-today" style="display:none"></span></button>
+      <button data-p="cal" onclick="owTab('cal')"><span class="ic">📅</span>יומן
+        <span class="bdg" id="ow-b-cal" style="display:none"></span></button>
+      <button data-p="feed" onclick="owTab('feed')"><span class="ic">🔔</span>הודעות</button>
+    </div>
+  </div>
+
+  <div class="sheet" id="sheet" onclick="if(event.target.id==='sheet')closeSheet()">
+    <div class="inner"><h3><span id="sh-title"></span><button class="x" onclick="closeSheet()">✕</button></h3>
+      <div class="sb2" id="sh-body"></div><div class="sf" id="sh-foot"></div></div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="splash"><div class="center"><div class="logo">🚚</div><div class="mut">מתחבר לשרת…</div></div></div>
+</div>
+<button id="fs-exit" onclick="toggleFs()">✕ סגור מפה מלאה</button>
+
+<script>
+/* ==================== חיבור לשרת ==================== */
+const SUPABASE_URL="https://tzddvgvfewomnjkleobb.supabase.co";
+const SUPABASE_KEY="sb_publishable_4LMyQvo5dGS_6xGL_uMoXA_Xyj4Sm_v";
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+/* ==================== עזרים ==================== */
+const $=id=>document.getElementById(id);
+const val=id=>{const e=$(id);return e?e.value:""};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ils=n=>"₪"+Number(n||0).toLocaleString("he-IL");
+const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const hm=d=>String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+const dt=s=>new Date(s);
+const LBL={free:"פנוי",busy:"בנסיעה",off:"עסוק"};
+const PAY=["מזומן","אשראי","הקפה / חשבונית"];
+const VTYPES=["מונית","רכב פרטי","מסחרי סגור","טנדר","מיניבוס 14 מקומות","משאית 12 טון"];
+const REASONS=["תקלה ברכב / פנצ׳ר","תאונה","בעיה רפואית","בעיה אישית דחופה","הלקוח ביטל","אחר"];
+const BASES=["ירושלים — מרכז העיר","ירושלים — גבעת שאול","ירושלים — תלפיות","ירושלים — פסגת זאב",
+"ירושלים — הר חוצבים","מעלה אדומים","מבשרת ציון","גבעת זאב","בית שמש","מודיעין"];
+const PLACES={"מרכז העיר":[31.782,35.216],"גבעת שאול":[31.793,35.193],"תלפיות":[31.752,35.220],
+"פסגת זאב":[31.832,35.242],"הר חוצבים":[31.801,35.197],"מעלה אדומים":[31.773,35.298],
+"מבשרת ציון":[31.800,35.150],"גבעת זאב":[31.862,35.170],"ירושלים":[31.782,35.216],
+"תל אביב":[32.075,34.780],"נתב״ג":[32.010,34.870],"באר שבע":[31.252,34.791],"חיפה":[32.794,34.990],
+"אשדוד":[31.801,34.650],"מודיעין":[31.898,35.010],"בית שמש":[31.750,34.988],"ים המלח":[31.450,35.450],
+"אילת":[29.554,34.952],"טבריה":[32.790,35.530],"נתניה":[32.330,34.853]};
+function resolveLL(t){t=String(t||"");
+  for(const k of Object.keys(PLACES))if(t.includes(k))
+    return[PLACES[k][0]+(Math.random()-.5)*.01,PLACES[k][1]+(Math.random()-.5)*.01];
+  return[31.782,35.216];}
+let toastT;
+function toast(m,bg="#22c55e",fg="#04240f"){const t=$("toast");t.textContent=m;t.style.background=bg;
+  t.style.color=fg;t.classList.add("on");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("on"),3600)}
+const err=m=>toast(m,"#ef4444","#fff");
+function sheet(title,body,foot){$("sh-title").innerHTML=title;$("sh-body").innerHTML=body;
+  $("sh-foot").innerHTML=foot||"";$("sheet").classList.add("on")}
+function closeSheet(){$("sheet").classList.remove("on")}
+function showScreen(s){document.querySelectorAll(".scr").forEach(e=>e.classList.remove("on"));
+  $("scr-"+s).classList.add("on")}
+function setBadge(id,n){const e=$(id);if(!e)return;e.style.display=n>0?"block":"none";e.textContent=n}
+async function rpc(fn,args){const{data,error}=await db.rpc(fn,args);
+  if(error){err(error.message);throw error}return data}
+
+/* ==================== מצב ==================== */
+let me=null;          // {role:'owner',fleet} | {role:'driver',driver}
+let D={drivers:[],trips:[],offers:[],releases:[],messages:[],journal:[],personal:[],declines:[]};
+let owPane="map",dvPane="home",owFilter="all",owQuery="",calTab="cal";
+let calCur=new Date(),calSel=ymd(new Date());
+
+/* ==================== התחברות ==================== */
+let authM="in";
+function authMode(m){authM=m;
+  $("sg-in").classList.toggle("on",m==="in");$("sg-up").classList.toggle("on",m==="up");
+  $("up-only").style.display=m==="up"?"block":"none";
+  $("au-go").textContent=m==="in"?"התחבר":"הירשם";
+  $("au-sub").textContent=m==="in"?"התחברות למערכת":"פתיחת חשבון חדש";
+  $("au-err").classList.remove("on")}
+function authErr(m){const e=$("au-err");e.textContent=m;e.classList.add("on")}
+
+async function doAuth(){
+  const email=val("au-email").trim(),pass=val("au-pass");
+  if(!email||!pass)return authErr("נא למלא אימייל וסיסמה");
+  if(authM==="up"&&pass.length<6)return authErr("הסיסמה חייבת להיות באורך 6 תווים לפחות");
+  $("au-go").disabled=true;
+  try{
+    if(authM==="in"){
+      const{error}=await db.auth.signInWithPassword({email,password:pass});
+      if(error)return authErr(error.message.includes("Invalid")?"אימייל או סיסמה שגויים":error.message);
+    }else{
+      const{error}=await db.auth.signUp({email,password:pass,
+        options:{data:{intended_role:val("au-role")}}});
+      if(error)return authErr(error.message.includes("already")?"האימייל הזה כבר רשום — עבור להתחברות":error.message);
+    }
+    await boot();
+  }finally{$("au-go").disabled=false}
+}
+async function signOut(){await db.auth.signOut();me=null;location.reload()}
+
+async function doClaim(){
+  const pin=val("cl-pin").trim();
+  if(pin.length!==6)return $("cl-err").textContent="הקוד חייב להיות 6 ספרות",$("cl-err").classList.add("on");
+  try{await rpc("claim_driver",{p_pin:pin});toast("חוברת בהצלחה!");await boot()}
+  catch(e){$("cl-err").textContent=e.message;$("cl-err").classList.add("on")}
+}
+async function doCreateFleet(){
+  const name=val("fl-name").trim();
+  if(!name)return $("fl-err").textContent="נא להזין שם",$("fl-err").classList.add("on");
+  try{await rpc("create_fleet",{p_name:name});toast("הצי נוצר!");await boot()}
+  catch(e){$("fl-err").textContent=e.message;$("fl-err").classList.add("on")}
+}
+
+/* ==================== אתחול ==================== */
+async function boot(){
+  $("splash").style.display="grid";
+  const{data:{user}}=await db.auth.getUser();
+  if(!user){$("splash").style.display="none";showScreen("auth");return}
+
+  const{data:fleets}=await db.from("fleets").select("*").eq("owner_id",user.id);
+  if(fleets&&fleets.length){
+    me={role:"owner",fleet:fleets[0]};
+    $("ow-name").textContent=fleets[0].name;
+    await loadAll();subscribe();showScreen("owner");owTab(owPane);
+    $("splash").style.display="none";return;
+  }
+  const{data:drv}=await db.from("drivers").select("*").limit(1);
+  if(drv&&drv.length){
+    me={role:"driver",driver:drv[0]};
+    await loadAll();subscribe();startGps();showScreen("driver");dvTab(dvPane);
+    $("splash").style.display="none";return;
+  }
+  // אין צי ואין נהג — לפי מה שביקש בהרשמה
+  $("splash").style.display="none";
+  showScreen(user.user_metadata?.intended_role==="owner"?"fleet":"claim");
+}
+
+async function loadAll(){
+  if(!me)return;
+  const q=[
+    db.from("drivers").select("*").order("name"),
+    db.from("trips").select("*").order("created_at",{ascending:false}).limit(300),
+    db.from("offers").select("*").eq("status","pending"),
+    db.from("releases").select("*").order("created_at",{ascending:false}).limit(50),
+    db.from("messages").select("*").order("sent_at",{ascending:false}).limit(120),
+  ];
+  if(me.role==="owner"){
+    q.push(db.from("journal_entries").select("*"));
+    q.push(db.from("personal_trips").select("*"));
+    q.push(db.from("offer_declines").select("*"));
+  }
+  const r=await Promise.all(q);
+  D.drivers=r[0].data||[];D.trips=r[1].data||[];D.offers=r[2].data||[];
+  D.releases=r[3].data||[];D.messages=r[4].data||[];
+  if(me.role==="owner"){D.journal=r[5].data||[];D.personal=r[6].data||[];D.declines=r[7].data||[]}
+  if(me.role==="driver"&&D.drivers.length)me.driver=D.drivers[0];
+}
+
+let reloadT;
+function subscribe(){
+  db.channel("fleet").on("postgres_changes",{event:"*",schema:"public"},()=>{
+    clearTimeout(reloadT);reloadT=setTimeout(async()=>{await loadAll();render()},350);
+  }).subscribe();
+}
+function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
+
+/* ==================== GPS אמיתי ==================== */
+function startGps(){
+  if(!navigator.geolocation)return;
+  navigator.geolocation.watchPosition(async p=>{
+    if(!me||me.role!=="driver")return;
+    await db.from("drivers").update({lat:p.coords.latitude,lng:p.coords.longitude,
+      last_seen:new Date().toISOString()}).eq("id",me.driver.id);
+  },e=>{if(e.code===1)toast("כדי שהמנהל יראה אותך במפה — אשר גישה למיקום","#f59e0b","#3a2500")},
+  {enableHighAccuracy:true,maximumAge:15000,timeout:20000});
+}
+
+/* ==================== מסך נהג ==================== */
+function dvTab(p){dvPane=p;
+  document.querySelectorAll("#dv-nav button").forEach(b=>b.classList.toggle("on",b.dataset.p===p));
+  renderDriver()}
+
+const myTrip=()=>D.trips.find(t=>t.status==="active"&&t.driver_id===me.driver.id);
+const myOffers=()=>D.offers.filter(o=>
+  (o.target===me.driver.id||o.target==="bid")&&new Date(o.expires_at)>new Date());
+const tripOf=o=>D.trips.find(t=>t.id===o.trip_id);
+function timeLeft(o){const ms=new Date(o.expires_at)-new Date();
+  if(ms<=0)return"פג תוקף";const h=Math.floor(ms/36e5),m=Math.floor(ms%36e5/6e4);
+  return h?`נותרו ${h} שע׳ ${m} דק׳`:`נותרו ${m} דק׳`}
+
+function renderDriver(){
+  const d=me.driver;if(!d)return;
+  $("dv-av").textContent=d.name.split(" ").map(w=>w[0]).join("");
+  $("dv-name").textContent=d.name;
+  $("dv-sub").textContent=`${d.code} · ${d.vehicle_type||""} · ${d.plate||""}`;
+  const b=$("dv-body"),t=myTrip(),unread=D.messages.filter(m=>!m.read_at&&m.driver_id===d.id).length;
+  setBadge("dv-b-msgs",unread);setBadge("dv-b-home",d.status==="free"?myOffers().length:0);
+
+  if(dvPane==="home"){
+    let h=`<div class="card statusbox">
+      <div class="lamp ${d.status}">${d.status==="free"?"🟢":d.status==="busy"?"🚕":"⚪"}</div>
+      <div class="st">${d.status==="free"?"אתה פנוי":d.status==="busy"?"אתה בנסיעה":"אתה עסוק"}</div>
+      <div class="ex">${d.status==="free"?"אתה מקבל הצעות נסיעה והמנהל רואה אותך במפה"
+        :d.status==="busy"?"סיים את הנסיעה הנוכחית כדי לקבל הצעות חדשות"
+        :"אינך מקבל הצעות נסיעה כרגע"}</div>
+      ${d.status!=="busy"?`<button class="btn ${d.status==="free"?"s":"ok"}" onclick="toggleAvail()">
+        ${d.status==="free"?"עבור למצב עסוק":"חזור למצב פנוי"}</button>`:""}
+      ${d.lat?`<div class="ex" style="margin-top:10px">📍 המיקום שלך משודר למנהל</div>`
+        :`<div class="ex" style="margin-top:10px;color:#d6bb52">⚠ אין מיקום — אשר גישה למיקום בדפדפן</div>`}</div>`;
+
+    if(t){
+      const rel=D.releases.find(r=>r.trip_id===t.id&&["pending","seen"].includes(r.status));
+      h+=`<div class="card" style="border-color:var(--busy)"><h4>הנסיעה הנוכחית</h4>
+        <div class="leg"><span class="pin">🟢</span><span class="txt"><span class="lb">איסוף</span>${esc(t.from_text)}</span></div>
+        <div class="leg"><span class="pin">🔴</span><span class="txt"><span class="lb">יעד</span>${esc(t.to_text)}</span></div>
+        ${t.note?`<div class="leg"><span class="pin">📝</span><span class="txt">${esc(t.note)}</span></div>`:""}
+        <div class="two" style="margin-top:11px">
+          <div class="center"><div class="big money">${ils(t.agreed_amount)}</div>
+            <div class="mut" style="font-size:11px">${esc(t.pay_method||"")}</div></div>
+          <div class="center"><div class="big">${t.picked_up_at?"🚗":"🚩"}</div>
+            <div class="mut" style="font-size:11px">${t.picked_up_at?"בדרך ליעד":"בדרך לאיסוף"}</div></div></div>
+        ${t.picked_up_at?`<button class="btn ok" onclick="doFinish('${t.id}')">✅ סיימתי — דיווח גבייה</button>`
+          :`<button class="btn p" onclick="doPickup('${t.id}')">🚩 אספתי את הלקוח</button>`}
+        <button class="btn s" onclick="navTo('${esc(t.to_text)}')">🧭 נווט ליעד</button>
+        ${rel?`<div class="priv" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.35);margin-top:10px">
+            🆘 <b>בקשת שחרור נשלחה</b> (${esc(rel.reason)})<br>
+            ${rel.status==="seen"?"👁 המנהל ראה את הבקשה ובודק אותה.":"ממתין שהמנהל יראה את הבקשה…"}<br>
+            עד לאישור — הנסיעה עדיין באחריותך.</div>`
+          :`<button class="btn no" onclick="askRelease('${t.id}')">🆘 בקשת שחרור מהנסיעה</button>`}</div>`;
+    }
+    if(d.status==="free"){
+      const os=myOffers();
+      h+=os.length?os.map(o=>{const tr=tripOf(o);if(!tr)return"";
+        return`<div class="offer">
+          <div class="hd"><span class="kind">${o.target==="bid"?"📣 מכרז — מי שלוקח ראשון":"🎯 נסיעה עבורך"}</span>
+            <span class="cd">${timeLeft(o)}</span></div>
+          <div class="leg"><span class="pin">🟢</span><span class="txt"><span class="lb">איסוף</span>${esc(tr.from_text)}</span></div>
+          <div class="leg"><span class="pin">🔴</span><span class="txt"><span class="lb">יעד</span>${esc(tr.to_text)}</span></div>
+          ${tr.note?`<div class="leg"><span class="pin">📝</span><span class="txt">${esc(tr.note)}</span></div>`:""}
+          <div class="amt">${ils(tr.agreed_amount)}</div><div class="pay">${esc(tr.pay_method||"")}</div>
+          <div class="rowbtns">
+            <button class="btn no sm" onclick="doDecline('${o.id}')">❌ לא יכול</button>
+            <button class="btn ok sm" onclick="doAccept('${o.id}')">✅ אני יכול</button></div></div>`}).join("")
+        :`<div class="card center mut" style="padding:22px;font-size:13px">
+           אין כרגע הצעות נסיעה.<br>ברגע שהמנהל ישלח — היא תופיע כאן.</div>`;
+    }
+    b.innerHTML=h;
+  }
+
+  if(dvPane==="trips"){
+    const done=D.trips.filter(t=>t.status==="done"&&t.driver_id===d.id);
+    const now=new Date(),mo=done.filter(t=>{const x=dt(t.done_at);
+      return x.getMonth()===now.getMonth()&&x.getFullYear()===now.getFullYear()});
+    const sum=a=>a.reduce((s,t)=>s+Number(t.collected_amount||0),0);
+    b.innerHTML=`<div class="stats2">
+      <div class="stat" style="--c:#3b82f6"><div class="n">${mo.length}</div><div class="l">נסיעות החודש</div></div>
+      <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(sum(mo))}</div><div class="l">גבייה החודש</div></div>
+      <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${mo.length?ils(Math.round(sum(mo)/mo.length)):"₪0"}</div><div class="l">ממוצע לנסיעה</div></div>
+      <div class="stat" style="--c:#8b5cf6"><div class="n">${done.length}</div><div class="l">סה״כ נסיעות</div></div></div>
+      <div class="card"><h4>כל הנסיעות שלי</h4>
+      ${done.length?`<table><thead><tr><th>תאריך</th><th>מסלול</th><th>גבייה</th></tr></thead><tbody>
+      ${done.map(t=>`<tr><td>${dt(t.done_at).toLocaleDateString("he-IL")}<br>
+        <span class="mut" style="font-size:10px">${hm(dt(t.done_at))}</span></td>
+        <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span></td>
+        <td class="money">${ils(t.collected_amount)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr class="sumrow"><td colspan="2">סה״כ ${done.length}</td>
+        <td class="money">${ils(sum(done))}</td></tr></tfoot></table>`
+      :`<div class="empty">עדיין לא ביצעת נסיעות</div>`}</div>`;
+  }
+
+  if(dvPane==="msgs"){
+    const mine=D.messages.filter(m=>m.driver_id===d.id||m.driver_id===null);
+    markRead(mine);
+    const kind={bid:"מכרז",offer:"הצעת נסיעה",system:"מערכת"};
+    b.innerHTML=`<button class="btn p" style="margin:0 0 12px" onclick="composeToManager()">✉ שלח הודעה למנהל</button>`+
+      (mine.length?mine.map(m=>`<div class="msg ${m.type==="bid"?"bid":""}${m.from_role==="driver"?" sent":""}">
+        <div class="mt">${dt(m.sent_at).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+         · ${m.from_role==="driver"?"נשלח על ידך":kind[m.type]||"הודעה מהמנהל"}</div>
+        <div class="mb">${esc(m.body)}</div></div>`).join("")
+      :`<div class="empty">אין הודעות</div>`);
+  }
+}
+async function markRead(list){
+  const ids=list.filter(m=>!m.read_at&&m.driver_id===me.driver.id).map(m=>m.id);
+  if(ids.length)await db.from("messages").update({read_at:new Date().toISOString()}).in("id",ids);
+}
+function navTo(dest){window.open("https://waze.com/ul?q="+encodeURIComponent(dest),"_blank")}
+async function toggleAvail(){
+  const s=me.driver.status==="free"?"off":"free";
+  const{error}=await db.from("drivers").update({status:s}).eq("id",me.driver.id);
+  if(error)return err(error.message);
+  toast(s==="off"?"עברת למצב עסוק":"חזרת למצב פנוי",s==="off"?"#5b6773":"#22c55e",s==="off"?"#fff":"#04240f");
+  await loadAll();render();
+}
+async function doAccept(id){try{await rpc("accept_offer",{p_offer:id});toast("הנסיעה שלך! בהצלחה 🚗");
+  await loadAll();render()}catch(e){await loadAll();render()}}
+async function doDecline(id){try{await rpc("decline_offer",{p_offer:id});
+  toast("סימנת שאינך יכול","#5b6773","#fff");await loadAll();render()}catch(e){}}
+async function doPickup(id){try{await rpc("pickup_trip",{p_trip:id});toast("סומן: הלקוח נאסף");
+  await loadAll();render()}catch(e){}}
+function doFinish(id){
+  const t=D.trips.find(x=>x.id===id);
+  sheet("✅ סיום נסיעה",
+    `<div class="priv" style="background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3)">
+      ${esc(t.from_text)} ← ${esc(t.to_text)}<br>סוכם: <b>${ils(t.agreed_amount)}</b></div>
+     <div class="fld"><label>כמה נגבה בפועל? (₪)</label><input id="f-amt" type="number" value="${t.agreed_amount}"></div>
+     <div class="fld"><label>אמצעי תשלום</label><select id="f-pay">${PAY.map(p=>`<option${p===t.pay_method?" selected":""}>${p}</option>`).join("")}</select></div>
+     <div class="fld"><label>הערה (רשות)</label><input id="f-note" placeholder="לדוגמה: שילם במלואו"></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn ok" onclick="submitFinish('${id}')">סיים ודווח</button>`);
+}
+async function submitFinish(id){
+  const amt=+val("f-amt")||0;if(!amt)return err("נא להזין את הסכום שנגבה");
+  try{await rpc("finish_trip",{p_trip:id,p_collected:amt,p_pay:val("f-pay"),p_note:val("f-note")||null});
+    closeSheet();toast(`הנסיעה הסתיימה · דווחו ${ils(amt)}`);await loadAll();render()}catch(e){}
+}
+function askRelease(id){
+  sheet("🆘 בקשת שחרור מנסיעה",
+    `<div class="priv" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.35)">
+      הבקשה תישלח למנהל. עד שהוא יאשר — הנסיעה עדיין באחריותך.</div>
+     <div class="fld"><label>סיבת הבקשה</label><select id="rl-reason">${REASONS.map(r=>`<option>${r}</option>`).join("")}</select></div>
+     <div class="fld"><label>פירוט למנהל</label><textarea id="rl-note" placeholder="לדוגמה: פנצ׳ר בכביש 1, ממתין לגרר"></textarea></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn no" onclick="sendRelease('${id}')">שלח בקשה</button>`);
+}
+async function sendRelease(id){
+  try{await rpc("request_release",{p_trip:id,p_reason:val("rl-reason"),p_detail:val("rl-note")||null});
+    closeSheet();toast("בקשת השחרור נשלחה למנהל","#ef4444","#fff");await loadAll();render()}catch(e){}
+}
+function composeToManager(){
+  sheet("✉ הודעה למנהל",
+    `<div class="fld"><label>ההודעה תישלח למנהל</label>
+      <textarea id="dm-t" placeholder="לדוגמה: אני מסיים היום ב-17:00"></textarea></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn p" onclick="sendToManager()">שלח</button>`);
+}
+async function sendToManager(){
+  const t=val("dm-t").trim();if(!t)return err("ההודעה ריקה");
+  const{error}=await db.from("messages").insert({fleet_id:me.driver.fleet_id,driver_id:me.driver.id,
+    from_role:"driver",type:"pm",body:t});
+  if(error)return err(error.message);
+  closeSheet();toast("ההודעה נשלחה למנהל");await loadAll();render();
+}
+
+/* ==================== מפה ==================== */
+let mapHost=null,lmap=null,pinLayer=null,routeLayer=null,mapFs=false;
+const hasL=()=>typeof L!=="undefined"&&L.map;
+function ensureHost(){if(!mapHost){mapHost=document.createElement("div");mapHost.id="mmap"}return mapHost}
+function initMap(){if(!hasL()||lmap)return;
+  lmap=L.map(mapHost,{zoomControl:true}).setView([31.782,35.216],12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(lmap);
+  pinLayer=L.layerGroup().addTo(lmap);routeLayer=L.layerGroup().addTo(lmap)}
+function paintMap(){
+  const host=ensureHost();if(!hasL()){host.innerHTML='<div class="empty">המפה דורשת חיבור לאינטרנט</div>';return}
+  initMap();pinLayer.clearLayers();routeLayer.clearLayers();
+  D.drivers.forEach(d=>{
+    if(d.lat==null||d.lng==null)return;
+    L.marker([d.lat,d.lng],{icon:L.divIcon({className:"",iconSize:null,
+      html:`<div class="pin2 ${d.status}"><span class="pd"></span><span class="pl">${esc(d.name)} · ${d.code}</span></div>`})})
+      .addTo(pinLayer).on("click",()=>openDriverCard(d.id));
+    const t=D.trips.find(x=>x.status==="active"&&x.driver_id===d.id);
+    if(t&&t.to_lat){
+      const pts=[[d.lat,d.lng]];
+      if(t.from_lat&&!t.picked_up_at)pts.push([t.from_lat,t.from_lng]);
+      pts.push([t.to_lat,t.to_lng]);
+      L.polyline(pts,{color:"#f59e0b",weight:3,opacity:.85,dashArray:"6 5"}).addTo(routeLayer);
+      L.marker([t.to_lat,t.to_lng],{icon:L.divIcon({className:"",iconSize:null,
+        html:`<div class="tripmark">🔴 ${esc(t.to_text)}</div>`})}).addTo(routeLayer);
+    }
+  });
+}
+function focusMap(w){if(!lmap)return;
+  if(w==="jlm")lmap.setView([31.782,35.216],12);
+  if(w==="country")lmap.fitBounds([[29.5,34.25],[33.3,35.9]],{padding:[10,10]});
+  if(w==="all"){const b=D.drivers.filter(d=>d.lat!=null).map(d=>[d.lat,d.lng]);
+    if(b.length)lmap.fitBounds(L.latLngBounds(b).pad(.15));else toast("אין עדיין נהגים עם מיקום","#f59e0b","#3a2500")}}
+function toggleFs(){mapFs=!mapFs;ensureHost().classList.toggle("fs",mapFs);
+  $("fs-exit").classList.toggle("on",mapFs);if(lmap)setTimeout(()=>lmap.invalidateSize(),60)}
+
+/* ==================== מסך בעלים ==================== */
+function owTab(p){owPane=p;
+  document.querySelectorAll("#ow-nav button").forEach(b=>b.classList.toggle("on",b.dataset.p===p));
+  renderOwner()}
+const openRel=()=>D.releases.filter(r=>["pending","seen"].includes(r.status));
+const pool=()=>D.trips.filter(t=>t.status==="released");
+const todayTrips=()=>{const k=ymd(new Date());
+  return D.trips.filter(t=>["active","done","released"].includes(t.status)&&t.accepted_at&&ymd(dt(t.accepted_at))===k)};
+const drvName=id=>{const d=D.drivers.find(x=>x.id===id);return d?`${d.name} (${d.code})`:"—"};
+
+function renderOwner(){
+  const b=$("ow-body");
+  const st=s=>D.drivers.filter(d=>d.status===s).length;
+  const now=new Date();
+  const money=D.trips.filter(t=>t.status==="done"&&t.done_at&&dt(t.done_at).getMonth()===now.getMonth()
+    &&dt(t.done_at).getFullYear()===now.getFullYear()).reduce((s,t)=>s+Number(t.collected_amount||0),0);
+  $("ow-sub").textContent=`${D.drivers.length} נהגים · ${st("free")} פנויים`;
+  setBadge("ow-b-map",openRel().length+pool().length);
+  setBadge("ow-b-today",todayTrips().filter(t=>t.status==="active").length);
+  setBadge("ow-b-cal",D.journal.filter(e=>e.entry_date===ymd(now)).length);
+
+  if(owPane==="map"){
+    b.innerHTML=relBanner()+poolCard()+`
+      <div class="stats2">
+        <div class="stat" style="--c:#22c55e"><div class="n">${st("free")}</div><div class="l">פנויים</div></div>
+        <div class="stat" style="--c:#f59e0b"><div class="n">${st("busy")}</div><div class="l">בנסיעה</div></div>
+        <div class="stat" style="--c:#5b6773"><div class="n">${st("off")}</div><div class="l">עסוקים</div></div>
+        <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${ils(money)}</div><div class="l">גבייה החודש</div></div>
+      </div>
+      <div class="mapbar">
+        <button onclick="focusMap('jlm')">📍 ירושלים</button>
+        <button onclick="focusMap('all')">👥 כל הנהגים</button>
+        <button onclick="focusMap('country')">🗺 כל הארץ</button>
+        <button onclick="toggleFs()">⛶ מסך מלא</button></div>
+      <div id="map-slot"></div>
+      ${D.offers.length?`<div class="card"><h4>ממתין לאישור נהג (${D.offers.length})</h4>
+        ${D.offers.map(o=>{const t=tripOf(o);return t?`<div class="ent pend">
+          <div class="ti">${esc(t.from_text)} ← ${esc(t.to_text)}</div>
+          <div class="nt">${o.target==="bid"?"📣 מכרז לכל הפנויים":"🎯 "+esc(drvName(o.target))} · ${ils(t.agreed_amount)}
+            <br>⏳ ${timeLeft(o)}${D.declines.filter(x=>x.offer_id===o.id).length
+              ?` · ${D.declines.filter(x=>x.offer_id===o.id).length} סימנו "לא יכול"`:""}</div>
+          </div>`:""}).join("")}</div>`:""}`;
+    const slot=$("map-slot");if(slot&&!mapFs)slot.appendChild(ensureHost());
+    paintMap();if(lmap)setTimeout(()=>lmap.invalidateSize(),0);
+  }
+
+  if(owPane==="drivers"){
+    const items=D.drivers.filter(d=>(owFilter==="all"||d.status===owFilter)&&
+      (!owQuery||d.name.includes(owQuery)||d.code.includes(owQuery)||(d.plate||"").includes(owQuery)));
+    b.innerHTML=`<div class="fld"><input id="ow-q" placeholder="🔍 חיפוש לפי שם, קוד או מספר רכב"
+        value="${esc(owQuery)}" oninput="owQuery=this.value;renderOwner();$('ow-q').focus()"></div>
+      <div class="chips">
+        ${[["all","הכל"],["free","פנויים"],["busy","בנסיעה"],["off","עסוקים"]].map(([k,l])=>
+          `<button class="${owFilter===k?"on":""}" onclick="owFilter='${k}';renderOwner()">${l}</button>`).join("")}
+        <button onclick="openAdd()">➕ הוסף נהג</button></div>
+      <div class="mut" style="font-size:11.5px;margin-bottom:9px">${items.length} מתוך ${D.drivers.length}</div>
+      ${items.map(d=>`<div class="drow" onclick="openDriverCard('${d.id}')">
+        <div class="av">${d.name.split(" ").map(w=>w[0]).join("")}</div>
+        <div class="i"><div class="n1">${esc(d.name)}<span class="code">${d.code}</span></div>
+          <div class="n2">🚗 ${esc(d.vehicle_type||"—")} · ${esc(d.plate||"—")}</div>
+          <div class="n3">${d.join_pin?`🔑 קוד חיבור: ${d.join_pin} — טרם התחבר`
+            :d.lat?"📍 מיקום מעודכן":"⚪ אין מיקום"}</div></div>
+        <span class="badge ${d.status}">${LBL[d.status]}</span></div>`).join("")
+        ||`<div class="empty">אין עדיין נהגים.<br>לחץ "➕ הוסף נהג" כדי להתחיל.</div>`}`;
+  }
+
+  if(owPane==="today"){
+    const tt=todayTrips(),done=tt.filter(t=>t.status==="done");
+    const col=done.reduce((s,t)=>s+Number(t.collected_amount||0),0);
+    b.innerHTML=relBanner()+poolCard()+`
+      <div class="stats2">
+        <div class="stat" style="--c:#3b82f6"><div class="n">${tt.length}</div><div class="l">נסיעות שיצאו היום</div></div>
+        <div class="stat" style="--c:#f59e0b"><div class="n">${tt.filter(t=>t.status==="active").length}</div><div class="l">בביצוע</div></div>
+        <div class="stat" style="--c:#22c55e"><div class="n">${done.length}</div><div class="l">הושלמו</div></div>
+        <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${ils(col)}</div><div class="l">נגבה היום</div></div></div>
+      <div class="card"><h4>כל הנסיעות שיצאו היום — ומי קיבל</h4>
+      ${tt.length?`<table><thead><tr><th>שעה</th><th>נסיעה</th><th>הנהג</th><th>גבייה</th></tr></thead><tbody>
+      ${tt.map(t=>`<tr><td>${hm(dt(t.accepted_at))}<br>
+        <span class="badge ${t.status==="done"?"free":t.status==="released"?"off":"busy"}" style="font-size:9.5px">
+        ${t.status==="done"?"הושלמה":t.status==="released"?"שוחררה":"בביצוע"}</span></td>
+        <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span><br>
+          <span class="mut">${t.source==="bid"?"מכרז":t.source==="journal"?"מהיומן שלי":t.source==="reassign"?"שיבוץ מחדש":"שיבוץ ישיר"}</span></td>
+        <td style="font-size:11px">${esc(drvName(t.driver_id))}</td>
+        <td class="money">${ils(t.collected_amount??t.agreed_amount)}
+          ${t.collected_amount!=null&&Number(t.collected_amount)!==Number(t.agreed_amount)
+            ?`<br><span class="mut" style="font-size:9.5px">סוכם ${ils(t.agreed_amount)}</span>`:""}</td></tr>`).join("")}
+      </tbody><tfoot><tr class="sumrow"><td colspan="3">סה״כ ${tt.length} · ${done.length} הושלמו</td>
+        <td class="money">${ils(col)}</td></tr></tfoot></table>`
+      :`<div class="empty">עדיין לא יצאה היום אף נסיעה.</div>`}</div>`;
+  }
+
+  if(owPane==="cal")renderCal();
+
+  if(owPane==="feed"){
+    b.innerHTML=D.messages.length?D.messages.map(m=>`
+      <div class="msg ${m.type==="bid"?"bid":m.from_role==="driver"?"sent":""}">
+        <div class="mt">${dt(m.sent_at).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}
+         · ${m.from_role==="driver"?"📩 מנהג: "+esc(drvName(m.driver_id)):m.driver_id?"נשלח ל"+esc(drvName(m.driver_id)):"לכולם"}</div>
+        <div class="mb">${esc(m.body)}</div></div>`).join("")
+      :`<div class="empty">אין עדיין הודעות</div>`;
+  }
+}
+
+function relBanner(){
+  const o=openRel();if(!o.length)return"";
+  return`<div class="card" style="border-color:var(--red);background:rgba(239,68,68,.07)">
+    <h4 style="color:#f87171">🆘 בקשות שחרור (${o.length})</h4>
+    ${o.map(r=>{const t=D.trips.find(x=>x.id===r.trip_id);
+      return`<div class="ent rel"><div class="ti">${esc(drvName(r.driver_id))}</div>
+      <div class="nt">${t?esc(t.from_text)+" ← "+esc(t.to_text)+" · "+ils(t.agreed_amount):""}<br>
+        <b>סיבה:</b> ${esc(r.reason)}${r.detail?`<br>${esc(r.detail)}`:""}<br>
+        <span class="mut">${hm(dt(r.created_at))}${r.status==="seen"?" · סימנת שראית":""}</span></div>
+      <div class="ea">${r.status==="pending"
+        ?`<button onclick="doSeen('${r.id}')">👁 ראיתי את הבקשה</button>`
+        :`<button class="ok" onclick="doDecide('${r.id}',true)">✅ אשר שחרור</button>
+          <button onclick="doDecide('${r.id}',false)" style="border-color:rgba(239,68,68,.45);color:#f87171">❌ דחה</button>`}
+      </div></div>`}).join("")}</div>`;
+}
+function poolCard(){
+  const p=pool();if(!p.length)return"";
+  return`<div class="card" style="border-color:var(--gold)">
+    <h4 style="color:var(--gold)">↩ נסיעות שחזרו אליך לשיבוץ מחדש (${p.length})</h4>
+    ${p.map(t=>`<div class="ent pend"><div class="ti">${esc(t.from_text)} ← ${esc(t.to_text)}</div>
+      <div class="nt">${ils(t.agreed_amount)} · ${esc(t.pay_method||"")}</div>
+      <div class="ea"><button class="ok" onclick="openReassign('${t.id}')">↗ שבץ לנהג אחר</button>
+        <button onclick="dropTrip('${t.id}')">בטל נסיעה</button></div></div>`).join("")}</div>`;
+}
+async function doSeen(id){try{await rpc("seen_release",{p_release:id});toast("נשלח לנהג אישור שראית");
+  await loadAll();render()}catch(e){}}
+async function doDecide(id,ok){try{await rpc("decide_release",{p_release:id,p_approve:ok});
+  toast(ok?"הנהג שוחרר · הנסיעה חזרה אליך":"הסירוב נשלח · הנסיעה נשארה אצלו",
+    ok?"#22c55e":"#f59e0b",ok?"#04240f":"#3a2500");await loadAll();render()}catch(e){}}
+async function dropTrip(id){
+  if(!confirm("לבטל את הנסיעה?"))return;
+  await db.from("trips").update({status:"cancelled"}).eq("id",id);
+  toast("הנסיעה בוטלה","#ef4444","#fff");await loadAll();render();
+}
+
+/* ----- כרטיס נהג ----- */
+function openDriverCard(id,tab="info"){
+  const d=D.drivers.find(x=>x.id===id);if(!d)return;
+  const done=D.trips.filter(t=>t.status==="done"&&t.driver_id===id);
+  const sum=a=>a.reduce((s,t)=>s+Number(t.collected_amount||0),0);
+  let body=`<div class="tabs">${[["info","פרטים"],["hist","היסטוריה"]].map(([k,l])=>
+    `<button class="${tab===k?"on":""}" onclick="openDriverCard('${id}','${k}')">${l}</button>`).join("")}</div>`;
+  if(tab==="info")body+=`<table><tbody>
+    <tr><td class="mut">קוד נהג</td><td>${d.code}</td></tr>
+    <tr><td class="mut">מספר רכב</td><td>${esc(d.plate||"—")}</td></tr>
+    <tr><td class="mut">סוג רכב</td><td>${esc(d.vehicle_type||"—")}</td></tr>
+    <tr><td class="mut">טלפון</td><td>${esc(d.phone||"—")}</td></tr>
+    <tr><td class="mut">בסיס</td><td>${esc(d.base_area||"—")}</td></tr>
+    <tr><td class="mut">סטטוס</td><td>${LBL[d.status]}</td></tr>
+    <tr><td class="mut">נראה לאחרונה</td><td>${d.last_seen?dt(d.last_seen).toLocaleString("he-IL"):"—"}</td></tr>
+    <tr><td class="mut">סה״כ נסיעות</td><td>${done.length}</td></tr>
+    <tr><td class="mut">סה״כ גבייה</td><td class="money">${ils(sum(done))}</td></tr>
+    ${d.join_pin?`<tr><td class="mut">קוד חיבור</td><td style="color:var(--gold);font-weight:700">${d.join_pin}</td></tr>`:""}
+    </tbody></table>
+    ${d.join_pin?`<div class="priv" style="margin-top:12px">הנהג עדיין לא חיבר את החשבון שלו.
+      מסור לו את הקוד <b style="color:var(--gold)">${d.join_pin}</b> — הוא נרשם באימייל וסיסמה, מזין אותו פעם אחת, וזהו.</div>`
+      :`<button class="btn s sm" style="margin-top:12px" onclick="doResetPin('${id}')">🔑 צור קוד חיבור חדש</button>`}`;
+  if(tab==="hist")body+=done.length?`<table><thead><tr><th>תאריך</th><th>מסלול</th><th>גבייה</th></tr></thead><tbody>
+    ${done.map(t=>`<tr><td>${dt(t.done_at).toLocaleDateString("he-IL")}</td>
+      <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span></td>
+      <td class="money">${ils(t.collected_amount)}</td></tr>`).join("")}</tbody>
+    <tfoot><tr class="sumrow"><td colspan="2">סה״כ ${done.length}</td>
+      <td class="money">${ils(sum(done))}</td></tr></tfoot></table>`:`<div class="empty">אין עדיין נסיעות</div>`;
+  sheet(`${esc(d.name)} <span class="code">${d.code}</span>`,body,
+    `<button class="btn d sm" onclick="doRemove('${id}')">🗑</button>
+     <button class="btn s sm" onclick="openPM('${id}')">✉ הודעה</button>
+     ${d.status==="free"?`<button class="btn p sm" onclick="openTrip('${id}')">שלח נסיעה</button>`:""}`);
+}
+async function doResetPin(id){
+  try{const pin=await rpc("reset_join_pin",{p_driver:id});
+    sheet("🔑 קוד חיבור חדש",`<div class="priv">מסור לנהג את הקוד הזה. הוא נרשם באימייל וסיסמה ומזין אותו פעם אחת.</div>
+      <div class="pinbox"><div class="p">${pin}</div></div>`,
+      `<button class="btn p" onclick="closeSheet()">סגור</button>`);
+    await loadAll();render()}catch(e){}
+}
+async function doRemove(id){
+  const d=D.drivers.find(x=>x.id===id);
+  if(!confirm(`להסיר את ${d.name} (${d.code})?`))return;
+  const{error}=await db.from("drivers").delete().eq("id",id);
+  if(error)return err(error.message);
+  closeSheet();toast(`${d.name} הוסר`,"#ef4444","#fff");await loadAll();render();
+}
+function openAdd(){
+  sheet("➕ הוספת נהג",
+    `<div class="fld"><label>שם מלא</label><input id="a-name" placeholder="ישראל ישראלי"></div>
+     <div class="two"><div class="fld"><label>מספר רכב</label><input id="a-plate" placeholder="12-345-67"></div>
+     <div class="fld"><label>סוג רכב</label><select id="a-type">${VTYPES.map(t=>`<option>${t}</option>`).join("")}</select></div></div>
+     <div class="two"><div class="fld"><label>טלפון</label><input id="a-phone" placeholder="050-0000000"></div>
+     <div class="fld"><label>בסיס</label><select id="a-base">${BASES.map(c=>`<option>${c}</option>`).join("")}</select></div></div>
+     <div class="priv">בסיום תקבל <b>קוד חיבור בן 6 ספרות</b> למסור לנהג.</div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn p" onclick="doAdd()">הוסף</button>`);
+}
+async function doAdd(){
+  const name=val("a-name").trim();if(!name)return err("נא להזין שם");
+  try{const d=await rpc("add_driver",{p_fleet:me.fleet.id,p_name:name,p_phone:val("a-phone")||null,
+      p_plate:val("a-plate")||null,p_vtype:val("a-type"),p_base:val("a-base")});
+    sheet("✅ הנהג נוסף",
+      `<div class="priv">${esc(name)} נוסף כ-<b>${d.code}</b>.<br>
+        מסור לו את קוד החיבור הזה — הוא נרשם באימייל וסיסמה ומזין אותו פעם אחת:</div>
+       <div class="pinbox"><div class="p">${d.join_pin}</div></div>`,
+      `<button class="btn p" onclick="closeSheet()">סגור</button>`);
+    await loadAll();render()}catch(e){}
+}
+function openTrip(id,journalId){
+  const d=D.drivers.find(x=>x.id===id);
+  sheet(`שליחת נסיעה — ${esc(d.name)}`,
+    `<div class="fld"><label>כתובת איסוף</label><input id="t-from" placeholder="יפו 20, ירושלים"></div>
+     <div class="fld"><label>יעד</label><input id="t-to" placeholder="נתב״ג"></div>
+     <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="t-amt" type="number" placeholder="150"></div>
+     <div class="fld"><label>תשלום</label><select id="t-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>
+     <div class="fld"><label>הערה לנהג</label><input id="t-note" placeholder="רשות"></div>
+     <div class="priv">ההצעה תישלח לנהג לאישור. תוקף: 12 שעות.</div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn p" onclick="doSendTrip('${id}','${journalId||""}')">שלח לאישור</button>`);
+}
+async function doSendTrip(target,journalId){
+  const from=val("t-from").trim(),to=val("t-to").trim(),amt=+val("t-amt")||0;
+  if(!from||!to)return err("נא למלא איסוף ויעד");
+  if(!amt)return err("נא להזין סכום גבייה");
+  const f=resolveLL(from),t=resolveLL(to);
+  try{await rpc("send_offer",{p_fleet:me.fleet.id,p_target:target,p_from:from,p_from_lat:f[0],p_from_lng:f[1],
+      p_to:to,p_to_lat:t[0],p_to_lng:t[1],p_amount:amt,p_pay:val("t-pay"),p_note:val("t-note")||null,
+      p_source:journalId?"journal":target==="bid"?"bid":"direct",p_journal:journalId||null});
+    closeSheet();toast("ההצעה נשלחה — ממתין לאישור הנהג","#eab308","#241f00");
+    await loadAll();render()}catch(e){}
+}
+function openPM(id){
+  const d=D.drivers.find(x=>x.id===id);
+  sheet(`✉ הודעה ל${esc(d.name)}`,
+    `<div class="fld"><label>תוכן ההודעה</label><textarea id="pm-t"></textarea></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn p" onclick="doSendPM('${id}')">שלח</button>`);
+}
+async function doSendPM(id){
+  const t=val("pm-t").trim();if(!t)return err("ההודעה ריקה");
+  const{error}=await db.from("messages").insert({fleet_id:me.fleet.id,driver_id:id,
+    from_role:"owner",type:"pm",body:t});
+  if(error)return err(error.message);
+  closeSheet();toast("ההודעה נשלחה");await loadAll();render();
+}
+function openBroadcast(){
+  const free=D.drivers.filter(d=>d.status==="free").length;
+  sheet("📣 מכרז / הודעה לכולם",
+    `<div class="fld"><label>סוג השליחה</label><select id="b-kind" onchange="bKind()">
+      <option value="bid">🚕 מכרז נסיעה — הנהגים מאשרים או דוחים</option>
+      <option value="msg">💬 הודעה כללית בלבד</option></select></div>
+     <div id="b-bid"><div class="priv">יישלח ל-${free} הנהגים הפנויים. הראשון שיאשר מקבל.</div>
+       <div class="fld"><label>איסוף</label><input id="b-from" placeholder="יפו 20, ירושלים"></div>
+       <div class="fld"><label>יעד</label><input id="b-dest" placeholder="נתב״ג"></div>
+       <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="b-amt" type="number"></div>
+       <div class="fld"><label>תשלום</label><select id="b-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>
+       <div class="fld"><label>הערה</label><input id="b-note"></div></div>
+     <div id="b-msg" style="display:none">
+       <div class="fld"><label>תוכן ההודעה</label><textarea id="b-t"></textarea></div></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn g" onclick="doBroadcast()">שלח</button>`);
+}
+function bKind(){const k=val("b-kind");
+  $("b-bid").style.display=k==="bid"?"block":"none";$("b-msg").style.display=k==="msg"?"block":"none"}
+async function doBroadcast(){
+  if(val("b-kind")==="bid"){
+    const from=val("b-from").trim(),to=val("b-dest").trim(),amt=+val("b-amt")||0;
+    if(!from||!to)return err("נא למלא איסוף ויעד");
+    if(!amt)return err("נא להזין סכום גבייה");
+    if(!D.drivers.filter(d=>d.status==="free").length)return err("אין כרגע נהגים פנויים");
+    const f=resolveLL(from),t=resolveLL(to);
+    try{await rpc("send_offer",{p_fleet:me.fleet.id,p_target:"bid",p_from:from,p_from_lat:f[0],p_from_lng:f[1],
+        p_to:to,p_to_lat:t[0],p_to_lng:t[1],p_amount:amt,p_pay:val("b-pay"),p_note:val("b-note")||null,
+        p_source:"bid",p_journal:null});
+      closeSheet();toast("המכרז נשלח — ממתין למי שיאשר","#eab308","#241f00");await loadAll();render()}catch(e){}
+    return;
+  }
+  const t=val("b-t").trim();if(!t)return err("ההודעה ריקה");
+  const rows=D.drivers.map(d=>({fleet_id:me.fleet.id,driver_id:d.id,from_role:"owner",type:"pm",body:t}));
+  if(!rows.length)return err("אין נהגים");
+  const{error}=await db.from("messages").insert(rows);
+  if(error)return err(error.message);
+  closeSheet();toast(`נשלח ל-${rows.length} נהגים`,"#eab308","#241f00");await loadAll();render();
+}
+function openReassign(id){
+  const t=D.trips.find(x=>x.id===id),free=D.drivers.filter(d=>d.status==="free");
+  sheet("↗ שיבוץ מחדש",
+    `<div class="priv"><b>${esc(t.from_text)} ← ${esc(t.to_text)}</b></div>
+     <div class="fld"><label>למי להעביר?</label><select id="rs-to">
+       <option value="bid">📣 מכרז — כל הפנויים (${free.length})</option>
+       ${free.map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.code}</option>`).join("")}</select></div>
+     <div class="fld"><label>גבייה (₪)</label><input id="rs-amt" type="number" value="${t.agreed_amount}"></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn p" onclick="doReassign('${id}')">שלח לאישור</button>`);
+}
+async function doReassign(id){
+  const t=D.trips.find(x=>x.id===id),amt=+val("rs-amt")||0;
+  if(!amt)return err("נא להזין סכום גבייה");
+  try{await rpc("send_offer",{p_fleet:me.fleet.id,p_target:val("rs-to"),p_from:t.from_text,
+      p_from_lat:t.from_lat,p_from_lng:t.from_lng,p_to:t.to_text,p_to_lat:t.to_lat,p_to_lng:t.to_lng,
+      p_amount:amt,p_pay:t.pay_method,p_note:t.note,p_source:"reassign",p_journal:null});
+    await db.from("trips").update({status:"cancelled"}).eq("id",id);
+    closeSheet();toast("נשלח מחדש · ממתין לאישור","#eab308","#241f00");await loadAll();render()}catch(e){}
+}
+
+/* ==================== יומן פרטי ==================== */
+const dayEntries=k=>D.journal.filter(e=>e.entry_date===k).sort((a,b)=>a.entry_time.localeCompare(b.entry_time));
+function renderCal(){
+  const b=$("ow-body");
+  b.innerHTML=`<div class="priv">🔒 יומן פרטי — רק אתה רואה אותו. הנהגים לא רואים ממנו דבר.</div>
+    <div class="tabs">
+      <button class="${calTab==="cal"?"on":""}" onclick="calTab='cal';renderCal()">🗓 לוח שנה</button>
+      <button class="${calTab==="hist"?"on":""}" onclick="calTab='hist';renderCal()">📗 ההיסטוריה שלי</button>
+    </div><div id="cal-pane">${calTab==="cal"?calHtml():histHtml()}</div>`;
+}
+function calHtml(){
+  const y=calCur.getFullYear(),m=calCur.getMonth(),today=ymd(new Date());
+  const start=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate();
+  let g=["א","ב","ג","ד","ה","ו","ש"].map(d=>`<div class="dw">${d}</div>`).join("");
+  for(let i=0;i<start;i++)g+=`<div class="cd out"></div>`;
+  for(let d=1;d<=days;d++){
+    const k=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`,es=dayEntries(k);
+    g+=`<div class="cd${k===today?" today":""}${k===calSel?" sel":""}" onclick="calSel='${k}';renderCal()">
+      <span>${d}</span><span class="pips">${es.slice(0,4).map(()=>`<i class="pip"></i>`).join("")}</span></div>`;
+  }
+  const es=dayEntries(calSel);
+  const list=es.length?es.map(e=>{const pend=e.status==="pending";
+    return`<div class="ent${pend?" pend":""}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="tm">${e.entry_time.slice(0,5)}</span>
+        ${pend?`<span class="badge pend">⏳ ממתין לאישור</span>`:""}</div>
+      <div class="ti">${esc(e.title)}</div>
+      ${e.private_note?`<div class="nt">📝 ${esc(e.private_note)}</div>`:""}
+      <div class="ea">${pend?`<button onclick="calCancel('${e.id}')">בטל העברה</button>`
+        :`<button class="ok" onclick="calDone('${e.id}')">✅ בוצעה</button>
+          <button class="mv" onclick="calMove('${e.id}')">↗ העבר</button>
+          <button onclick="calEdit('${e.id}')">ערוך</button>
+          <button onclick="calDel('${e.id}')">מחק</button>`}</div></div>`}).join("")
+    :`<div class="empty" style="padding:22px">אין נסיעות ביום זה</div>`;
+  return`<div class="calnav"><button onclick="calShift(1)">›</button>
+      <span class="m">${calCur.toLocaleDateString("he-IL",{month:"long",year:"numeric"})}</span>
+      <button onclick="calShift(-1)">‹</button></div>
+    <div class="cgrid">${g}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">
+      <b style="font-size:13px">${new Date(calSel+"T12:00").toLocaleDateString("he-IL",{weekday:"long",day:"numeric",month:"long"})}</b>
+      <button class="btn p sm" style="width:auto;padding:7px 13px" onclick="calEdit()">➕ נסיעה</button></div>${list}`;
+}
+function calShift(n){calCur=new Date(calCur.getFullYear(),calCur.getMonth()+n,1);renderCal()}
+function calEdit(id){
+  const e=id?D.journal.find(x=>x.id===id):null;
+  sheet(e?"✏ עריכת נסיעה":"➕ נסיעה מתוכננת",
+    `<div class="two"><div class="fld"><label>תאריך</label><input id="e-date" type="date" value="${e?e.entry_date:calSel}"></div>
+     <div class="fld"><label>שעה</label><input id="e-time" type="time" value="${e?e.entry_time.slice(0,5):"08:00"}"></div></div>
+     <div class="fld"><label>הנסיעה</label><input id="e-what" value="${e?esc(e.title):""}" placeholder="יפו 20 ← נתב״ג"></div>
+     <div class="fld"><label>הערות אישיות (פרטי)</label><textarea id="e-note">${e?esc(e.private_note||""):""}</textarea></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn v" onclick="calSave('${id||""}')">שמור</button>`);
+}
+async function calSave(id){
+  const date=val("e-date"),time=val("e-time"),title=val("e-what").trim(),note=val("e-note").trim();
+  if(!date||!time)return err("נא לבחור תאריך ושעה");
+  if(!title)return err("נא לכתוב מה הנסיעה");
+  const row={fleet_id:me.fleet.id,entry_date:date,entry_time:time,title,private_note:note||null};
+  const{error}=id?await db.from("journal_entries").update(row).eq("id",id)
+                 :await db.from("journal_entries").insert(row);
+  if(error)return err(error.message);
+  calSel=date;calCur=new Date(date+"T12:00");closeSheet();toast("נשמר ביומן","#8b5cf6","#fff");
+  await loadAll();render();
+}
+async function calDel(id){
+  if(!confirm("למחוק מהיומן?"))return;
+  await db.from("journal_entries").delete().eq("id",id);
+  toast("נמחק","#ef4444","#fff");await loadAll();render();
+}
+function calDone(id){
+  const e=D.journal.find(x=>x.id===id);
+  sheet("✅ סיום נסיעה",
+    `<div class="priv" style="background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3)">
+      <b>${esc(e.title)}</b><br>${e.entry_date} · ${e.entry_time.slice(0,5)}</div>
+     <div class="two"><div class="fld"><label>סכום שנגבה (₪)</label><input id="dn-amt" type="number"></div>
+     <div class="fld"><label>תשלום</label><select id="dn-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>
+     <div class="fld"><label>הערת סיכום</label><input id="dn-note"></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn ok" onclick="calSaveDone('${id}')">שמור בהיסטוריה שלי</button>`);
+}
+async function calSaveDone(id){
+  const amt=+val("dn-amt")||0;if(!amt)return err("נא להזין את הסכום שנגבה");
+  const e=D.journal.find(x=>x.id===id);
+  const{error}=await db.from("personal_trips").insert({fleet_id:me.fleet.id,entry_date:e.entry_date,
+    entry_time:e.entry_time,title:e.title,private_note:e.private_note,amount:amt,
+    pay_method:val("dn-pay"),summary:val("dn-note")||null});
+  if(error)return err(error.message);
+  await db.from("journal_entries").delete().eq("id",id);
+  closeSheet();toast(`נשמר בהיסטוריה שלך · ${ils(amt)}`);await loadAll();render();
+}
+function calMove(id){
+  const e=D.journal.find(x=>x.id===id),free=D.drivers.filter(d=>d.status==="free");
+  const parts=e.title.split("←");
+  sheet("↗ העברת נסיעה",
+    `<div class="priv"><b>${esc(e.title)}</b><br>ההערות האישיות שלך לא נשלחות לנהג.</div>
+     <div class="fld"><label>למי להעביר?</label><select id="mv-to">
+       <option value="bid">📣 מכרז — כל הפנויים (${free.length})</option>
+       ${free.map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.code}</option>`).join("")}</select></div>
+     <div class="two"><div class="fld"><label>איסוף</label><input id="mv-from" value="${esc((parts[0]||"").trim())}"></div>
+     <div class="fld"><label>יעד</label><input id="mv-dest" value="${esc((parts[1]||"").trim())}"></div></div>
+     <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="mv-amt" type="number"></div>
+     <div class="fld"><label>תשלום</label><select id="mv-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>`,
+    `<button class="btn s" onclick="closeSheet()">ביטול</button>
+     <button class="btn g" onclick="calSendMove('${id}')">שלח לאישור</button>`);
+}
+async function calSendMove(id){
+  const from=val("mv-from").trim(),to=val("mv-dest").trim(),amt=+val("mv-amt")||0;
+  if(!from||!to)return err("נא למלא איסוף ויעד");
+  if(!amt)return err("נא להזין סכום גבייה");
+  const f=resolveLL(from),t=resolveLL(to);
+  try{await rpc("send_offer",{p_fleet:me.fleet.id,p_target:val("mv-to"),p_from:from,p_from_lat:f[0],
+      p_from_lng:f[1],p_to:to,p_to_lat:t[0],p_to_lng:t[1],p_amount:amt,p_pay:val("mv-pay"),
+      p_note:null,p_source:"journal",p_journal:id});
+    closeSheet();toast("נשלח · ממתין לאישור","#eab308","#241f00");await loadAll();render()}catch(e){}
+}
+async function calCancel(id){
+  const e=D.journal.find(x=>x.id===id);
+  if(e.offer_id)await db.from("offers").update({status:"cancelled"}).eq("id",e.offer_id);
+  await db.from("journal_entries").update({status:"planned",offer_id:null}).eq("id",id);
+  toast("ההעברה בוטלה","#8b5cf6","#fff");await loadAll();render();
+}
+function histHtml(){
+  if(!D.personal.length)return`<div class="empty">עדיין לא סימנת נסיעה כ"בוצעה".</div>`;
+  const s=[...D.personal].sort((a,b)=>(b.entry_date+b.entry_time).localeCompare(a.entry_date+a.entry_time));
+  const tot=s.reduce((a,t)=>a+Number(t.amount),0),m={};
+  s.forEach(t=>{const k=t.entry_date.slice(0,7);m[k]=m[k]||{n:0,s:0};m[k].n++;m[k].s+=Number(t.amount)});
+  return`<div class="stats2">
+      <div class="stat" style="--c:#8b5cf6"><div class="n">${s.length}</div><div class="l">נסיעות שביצעתי</div></div>
+      <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(tot)}</div><div class="l">סה״כ גבייה</div></div></div>
+    <div class="card"><h4>סיכום חודשי</h4><table><thead><tr><th>חודש</th><th>נסיעות</th><th>סה״כ</th></tr></thead><tbody>
+      ${Object.keys(m).sort().reverse().map(k=>{const[y,mo]=k.split("-");
+        return`<tr><td>${new Date(y,mo-1).toLocaleDateString("he-IL",{month:"long",year:"numeric"})}</td>
+        <td>${m[k].n}</td><td class="money">${ils(m[k].s)}</td></tr>`}).join("")}</tbody></table></div>
+    <div class="card"><h4>כל הנסיעות</h4><table><thead><tr><th>תאריך</th><th>הנסיעה</th><th>גבייה</th></tr></thead><tbody>
+      ${s.map(t=>`<tr><td>${t.entry_date}<br><span class="mut" style="font-size:10px">${t.entry_time.slice(0,5)}</span></td>
+        <td style="font-size:11.5px">${esc(t.title)}${t.summary?`<br><span class="mut">${esc(t.summary)}</span>`:""}</td>
+        <td class="money">${ils(t.amount)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr class="sumrow"><td colspan="2">סה״כ ${s.length}</td><td class="money">${ils(tot)}</td></tr></tfoot></table></div>`;
+}
+
+/* ==================== הפעלה ==================== */
+authMode("in");
+db.auth.onAuthStateChange((ev)=>{if(ev==="SIGNED_OUT"){me=null;showScreen("auth")}});
+boot();
+setInterval(()=>{if(me)render()},30000);   // רענון תצוגת הזמנים
+</script>
+<script>if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});</script>
+</body>
+</html>
