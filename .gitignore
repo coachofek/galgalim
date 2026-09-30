@@ -5,3 +5,6 @@ dashboard.html
 driver-app.html
 app.html
 supabase-config.js
+node_modules/
+# מפתח החתימה של האפליקציה — לגבות! בלעדיו אי אפשר לעדכן את האפליקציה אצל הנהגים
+keystore/

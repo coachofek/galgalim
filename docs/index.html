@@ -300,6 +300,12 @@ const SUPABASE_URL="https://tzddvgvfewomnjkleobb.supabase.co";
 const SUPABASE_KEY="sb_publishable_4LMyQvo5dGS_6xGL_uMoXA_Xyj4Sm_v";
 const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
+// באפליקציית האנדרואיד: מעקב ברקע (גם כשהטלפון בכיס) + התראות. בדפדפן: כמו קודם.
+const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
+const BG=NATIVE?Capacitor.registerPlugin("BackgroundGeolocation"):null;
+const LN=NATIVE?Capacitor.registerPlugin("LocalNotifications"):null;
+let bgWatcher=null;
+
 /* ==================== עזרים ==================== */
 const $=id=>document.getElementById(id);
 const val=id=>{const e=$(id);return e?e.value:""};
@@ -370,7 +376,9 @@ async function doAuth(){
     await boot();
   }finally{$("au-go").disabled=false}
 }
-async function signOut(){await db.auth.signOut();me=null;location.reload()}
+async function signOut(){
+  if(bgWatcher){await BG.removeWatcher({id:bgWatcher}).catch(()=>{});bgWatcher=null}
+  await db.auth.signOut();me=null;location.reload()}
 
 async function doClaim(){
   const pin=val("cl-pin").trim();
@@ -433,13 +441,68 @@ async function loadAll(){
 let reloadT;
 function subscribe(){
   db.channel("fleet").on("postgres_changes",{event:"*",schema:"public"},()=>{
-    clearTimeout(reloadT);reloadT=setTimeout(async()=>{await loadAll();render()},350);
+    clearTimeout(reloadT);reloadT=setTimeout(async()=>{await loadAll();render();notifyNew()},350);
   }).subscribe();
+  notifyNew(true);
 }
+
+/* ==================== התראות בטלפון (אפליקציה בלבד) ==================== */
+let seenIds=null,notifN=1;
+async function notifyNew(first){
+  if(!NATIVE||!me)return;
+  const items=[];
+  if(me.role==="driver"){
+    myOffers().forEach(o=>{const t=tripOf(o);items.push(["o"+o.id,
+      o.target==="bid"?"📣 מכרז חדש — מי שלוקח ראשון":"🎯 נסיעה חדשה עבורך",
+      t?`${t.from_text} ← ${t.to_text} · ${ils(t.agreed_amount)}`:"פתח את האפליקציה לפרטים"])});
+    D.messages.filter(m=>m.from_role==="owner"&&m.type==="pm").forEach(m=>
+      items.push(["m"+m.id,"✉ הודעה מהמנהל",m.body]));
+  }else{
+    D.releases.filter(r=>r.status==="pending").forEach(r=>
+      items.push(["r"+r.id,"🆘 בקשת שחרור",`${drvName(r.driver_id)}: ${r.reason||""}`]));
+    D.messages.filter(m=>m.from_role==="driver").forEach(m=>
+      items.push(["m"+m.id,"📩 הודעה מ"+drvName(m.driver_id),m.body]));
+  }
+  if(first||!seenIds){seenIds=new Set(items.map(i=>i[0]));return}
+  const fresh=items.filter(i=>!seenIds.has(i[0]));
+  fresh.forEach(i=>seenIds.add(i[0]));
+  if(!fresh.length)return;
+  try{await LN.schedule({notifications:fresh.map(([,title,body])=>
+    ({id:notifN++,title,body:String(body||"").slice(0,200),channelId:"alerts"}))})}catch(e){}
+}
+if(NATIVE)LN.createChannel({id:"alerts",name:"נסיעות והודעות",importance:5,visibility:1,vibration:true}).catch(()=>{});
 function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
 
 /* ==================== GPS אמיתי ==================== */
-function startGps(){
+
+// ברקע אנדרואיד מאט בקשות מהדפדפן הפנימי — לכן המיקום נשלח דרך ערוץ נייטיבי
+async function sendLocNative(lat,lng){
+  const{data:{session}}=await db.auth.getSession();
+  if(!session||!me||me.role!=="driver")return;
+  await Capacitor.Plugins.CapacitorHttp.request({method:"PATCH",
+    url:`${SUPABASE_URL}/rest/v1/drivers?id=eq.${me.driver.id}`,
+    headers:{apikey:SUPABASE_KEY,Authorization:"Bearer "+session.access_token,
+      "Content-Type":"application/json",Prefer:"return=minimal"},
+    data:{lat,lng,last_seen:new Date().toISOString()}}).catch(()=>{});
+}
+
+async function startGps(){
+  if(NATIVE){
+    if(bgWatcher)return;
+    try{await LN.requestPermissions()}catch(e){}
+    bgWatcher=await BG.addWatcher({
+      backgroundTitle:"גלגלים על גלגלים — מחובר",
+      backgroundMessage:"המיקום שלך נשלח למנהל",
+      requestPermissions:true,stale:false,distanceFilter:25
+    },(loc,e)=>{
+      if(e){
+        if(e.code==="NOT_AUTHORIZED"&&confirm("בלי גישה למיקום המנהל לא יראה אותך במפה.\nלפתוח הגדרות ולאשר?"))BG.openSettings();
+        return;
+      }
+      if(loc)sendLocNative(loc.latitude,loc.longitude);
+    });
+    return;
+  }
   if(!navigator.geolocation)return;
   navigator.geolocation.watchPosition(async p=>{
     if(!me||me.role!=="driver")return;

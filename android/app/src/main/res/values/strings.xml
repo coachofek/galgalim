@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">גלגלים על גלגלים</string>
+    <string name="title_activity_main">גלגלים על גלגלים</string>
+    <string name="package_name">il.galgalim.app</string>
+    <string name="custom_url_scheme">il.galgalim.app</string>
+</resources>

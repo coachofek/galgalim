@@ -1,0 +1,54 @@
+# בונה את אפליקציית האנדרואיד בכל שינוי, ומפרסם APK בכתובת קבועה:
+# https://github.com/coachofek/galgalim/releases/latest/download/galgalim.apk
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "android/**", "package.json", "package-lock.json", "capacitor.config.json", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install and sync web code into Android
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Build signed APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/galgalim.p12"
+          export KEYSTORE_FILE="$RUNNER_TEMP/galgalim.p12"
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/galgalim.apk"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.head_commit.message || 'בנייה ידנית' }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" galgalim.apk --latest \
+            --title "גרסה 1.0.${{ github.run_number }}" \
+            --notes "$NOTES"

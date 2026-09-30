@@ -1,0 +1,14 @@
+{
+  "appId": "il.galgalim.app",
+  "appName": "גלגלים על גלגלים",
+  "webDir": "docs",
+  "android": {
+    "useLegacyBridge": true
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_wheel",
+      "iconColor": "#EAB308"
+    }
+  }
+}

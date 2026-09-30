@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capacitor_background_geolocation_notification_channel_name">מעקב מיקום</string>
+    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_stat_wheel</string>
+    <string name="capacitor_background_geolocation_notification_color">#EAB308</string>
+</resources>
