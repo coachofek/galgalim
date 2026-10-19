@@ -85,6 +85,8 @@ async function ownerApi() {
     await owner.rpc("finish_trip", { p_trip: t.id, p_collected: 0, p_pay: "מזומן", p_note: "ניקוי בדיקה" }).catch(() => {});
   }
 
+  // אמולטור בענן: נותנים לשירותי גוגל דקה להתייצב אחרי האתחול (בטלפון אמיתי זה לא נדרש)
+  await sleep(60000);
   sh("adb install -r app-debug.apk");
   for (const p of ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"]) {
     try { sh(`adb shell pm grant ${APP} android.permission.${p}`); } catch {}
@@ -138,10 +140,15 @@ async function ownerApi() {
       p_to: "מלחה", p_to_lat: 31.751, p_to_lng: 35.187, p_amount: 55, p_pay: "מזומן", p_note: "בדיקה אוטומטית",
       p_source: "direct", p_journal: null,
     });
-    const found = await poll(() => {
-      const d = sh("adb shell dumpsys notification --noredact");
-      return d.includes("נסיעה חדשה") ? true : null;
-    }, 60000, 3000);
+    const seen = () => sh("adb shell dumpsys notification --noredact").includes("נסיעה חדשה") ? true : null;
+    let found = await poll(seen, 60000, 3000).catch(() => null);
+    if (!found) {
+      // ניסיון שני — אם שירותי גוגל באמולטור נפלו בדרך
+      await owner.rpc("send_offer", { p_fleet: fleet.id, p_target: drv.id, p_from: "בדיקה חוזרת", p_from_lat: null, p_from_lng: null,
+        p_to: "בדיקה", p_to_lat: null, p_to_lng: null, p_amount: 1, p_pay: "מזומן", p_note: "", p_source: "direct", p_journal: null });
+      found = await poll(seen, 90000, 3000);
+      results.push(["⚠", "ההתראה הגיעה רק בניסיון השני", "כנראה שירותי גוגל באמולטור"]);
+    }
     sh("adb shell cmd statusbar expand-notifications"); await sleep(2500); shot("notification");
     sh("adb shell cmd statusbar collapse");
     return found && "ההתראה הופיעה בטלפון";
