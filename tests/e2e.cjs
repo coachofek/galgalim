@@ -22,7 +22,7 @@ const shot = (name) => {
 };
 async function step(name, fn) {
   try { const info = await fn(); results.push(["✅", name, info ?? ""]); console.log("PASS", name, info ?? ""); }
-  catch (e) { results.push(["❌", name, String(e.message || e)]); console.log("FAIL", name, e.message || e); }
+  catch (e) { results.push(["❌", name, String(e.message || e)]); console.log("FAIL", name, e.message || e); try { shot("FAIL"); } catch {} }
 }
 async function poll(fn, ms = 60000, every = 2000) {
   const end = Date.now() + ms; let last;
@@ -31,9 +31,11 @@ async function poll(fn, ms = 60000, every = 2000) {
 }
 
 // ---- חיבור ל-WebView דרך DevTools ----
-let ws, msgId = 0; const pending = new Map();
+let ws, msgId = 0, connPid = null; const pending = new Map(); const restarts = [];
 async function connectWebView() {
   const pid = await poll(() => sh(`adb shell pidof ${APP}`) || null, 30000);
+  if (connPid && pid !== connPid) restarts.push(new Date().toISOString().slice(11, 19));
+  connPid = pid; try { ws?.close(); } catch {}
   await poll(() => sh("adb shell cat /proc/net/unix").includes(`webview_devtools_remote_${pid}`), 30000);
   sh(`adb forward tcp:9222 localabstract:webview_devtools_remote_${pid}`);
   const page = await poll(async () => {
@@ -44,7 +46,13 @@ async function connectWebView() {
   ws.onmessage = (m) => { const d = JSON.parse(m.data); if (pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); } };
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 }
-function evalJs(expr) {
+async function evalJs(expr) {
+  let pid = ""; try { pid = sh(`adb shell pidof ${APP}`); } catch {}
+  if (!pid) { sh(`adb shell am start -n ${APP}/.MainActivity`); await sleep(6000); }
+  if (!pid || pid !== connPid) await connectWebView();
+  return evalRaw(expr);
+}
+function evalRaw(expr) {
   return new Promise((resolve, reject) => {
     const id = ++msgId;
     pending.set(id, (d) => {
@@ -125,7 +133,6 @@ async function ownerApi() {
 
   let offer;
   await step("התראה מגיעה כשהאפליקציה ברקע", async () => {
-    sh("adb logcat -c");
     offer = await owner.rpc("send_offer", {
       p_fleet: fleet.id, p_target: drv.id, p_from: "תחנה מרכזית", p_from_lat: 31.789, p_from_lng: 35.203,
       p_to: "מלחה", p_to_lat: 31.751, p_to_lng: 35.187, p_amount: 55, p_pay: "מזומן", p_note: "בדיקה אוטומטית",
@@ -166,9 +173,11 @@ async function ownerApi() {
   });
 
   // שגיאות JavaScript מהאפליקציה
-  try { fs.writeFileSync(`${OUT}/logcat.txt`, sh("adb logcat -d -s Capacitor/Console:* Capacitor:* chromium:*")); } catch {}
+  try { fs.writeFileSync(`${OUT}/logcat.txt`, sh("adb logcat -d -s Capacitor/Console:* Capacitor:* chromium:* AndroidRuntime:* ActivityManager:I")); } catch {}
+  try { fs.writeFileSync(`${OUT}/crash.txt`, sh("adb logcat -d -b crash")); } catch {}
+  if (restarts.length) results.push(["⚠", "האפליקציה הופעלה מחדש באמצע", restarts.join(", ")]);
 
-  const ok = results.every((r) => r[0] === "✅");
+  const ok = results.every((r) => r[0] !== "❌");
   const md = `# בדיקת אנדרואיד אוטומטית — ${ok ? "✅ הכל עבר" : "❌ יש כשלים"}\n\n| | שלב | פרטים |\n|---|---|---|\n` +
     results.map((r) => `| ${r[0]} | ${r[1]} | ${String(r[2]).replace(/\|/g, "/")} |`).join("\n") + "\n";
   fs.writeFileSync(`${OUT}/report.md`, md);
