@@ -303,7 +303,7 @@ const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 // באפליקציית האנדרואיד: מעקב ברקע (גם כשהטלפון בכיס) + התראות. בדפדפן: כמו קודם.
 const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
 const BG=NATIVE?Capacitor.registerPlugin("BackgroundGeolocation"):null;
-const LN=NATIVE?Capacitor.registerPlugin("LocalNotifications"):null;
+const PN=NATIVE?Capacitor.registerPlugin("PushNotifications"):null;
 let bgWatcher=null;
 
 /* ==================== עזרים ==================== */
@@ -378,6 +378,7 @@ async function doAuth(){
 }
 async function signOut(){
   if(bgWatcher){await BG.removeWatcher({id:bgWatcher}).catch(()=>{});bgWatcher=null}
+  if(pushToken)await db.from("push_tokens").delete().eq("token",pushToken);
   await db.auth.signOut();me=null;location.reload()}
 
 async function doClaim(){
@@ -441,36 +442,37 @@ async function loadAll(){
 let reloadT;
 function subscribe(){
   db.channel("fleet").on("postgres_changes",{event:"*",schema:"public"},()=>{
-    clearTimeout(reloadT);reloadT=setTimeout(async()=>{await loadAll();render();notifyNew()},350);
+    clearTimeout(reloadT);reloadT=setTimeout(async()=>{await loadAll();render()},350);
   }).subscribe();
-  notifyNew(true);
+  setupPush();
 }
 
-/* ==================== התראות בטלפון (אפליקציה בלבד) ==================== */
-let seenIds=null,notifN=1;
-async function notifyNew(first){
-  if(!NATIVE||!me)return;
-  const items=[];
-  if(me.role==="driver"){
-    myOffers().forEach(o=>{const t=tripOf(o);items.push(["o"+o.id,
-      o.target==="bid"?"📣 מכרז חדש — מי שלוקח ראשון":"🎯 נסיעה חדשה עבורך",
-      t?`${t.from_text} ← ${t.to_text} · ${ils(t.agreed_amount)}`:"פתח את האפליקציה לפרטים"])});
-    D.messages.filter(m=>m.from_role==="owner"&&m.type==="pm").forEach(m=>
-      items.push(["m"+m.id,"✉ הודעה מהמנהל",m.body]));
-  }else{
-    D.releases.filter(r=>r.status==="pending").forEach(r=>
-      items.push(["r"+r.id,"🆘 בקשת שחרור",`${drvName(r.driver_id)}: ${r.reason||""}`]));
-    D.messages.filter(m=>m.from_role==="driver").forEach(m=>
-      items.push(["m"+m.id,"📩 הודעה מ"+drvName(m.driver_id),m.body]));
-  }
-  if(first||!seenIds){seenIds=new Set(items.map(i=>i[0]));return}
-  const fresh=items.filter(i=>!seenIds.has(i[0]));
-  fresh.forEach(i=>seenIds.add(i[0]));
-  if(!fresh.length)return;
-  try{await LN.schedule({notifications:fresh.map(([,title,body])=>
-    ({id:notifN++,title,body:String(body||"").slice(0,200),channelId:"alerts"}))})}catch(e){}
+/* ==================== התראות פוש (אפליקציה בלבד) ==================== */
+// השרת שולח התראה דרך Firebase על כל הודעה/הצעה/בקשת שחרור — גם כשהאפליקציה סגורה.
+let pushToken=null,pushP=null;
+function setupPush(){
+  if(!NATIVE)return Promise.resolve();
+  return pushP||(pushP=initPush().catch(()=>{}));
 }
-if(NATIVE)LN.createChannel({id:"alerts",name:"נסיעות והודעות",importance:5,visibility:1,vibration:true}).catch(()=>{});
+async function initPush(){
+  await PN.createChannel({id:"alerts",name:"נסיעות והודעות",importance:5,visibility:1,vibration:true}).catch(()=>{});
+  PN.addListener("registration",async t=>{
+    pushToken=t.value;
+    await rpc("register_push_token",{p_token:t.value,p_platform:"android"}).catch(()=>{});
+  });
+  // כשהאפליקציה פתוחה המערכת לא מציגה את ההתראה — מציגים בעצמנו ומרעידים
+  PN.addListener("pushNotificationReceived",n=>{
+    toast((n.title||"")+(n.body?" — "+n.body:""),"#eab308","#2a2000");
+    try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}
+  });
+  PN.addListener("pushNotificationActionPerformed",()=>{
+    me&&(me.role==="owner"?owTab("map"):dvTab("home"));
+  });
+  let perm=await PN.checkPermissions();
+  if(perm.receive!=="granted")perm=await PN.requestPermissions();
+  if(perm.receive==="granted")await PN.register();
+  else toast("בלי אישור התראות לא תדע כשמגיעה נסיעה — אפשר לאשר בהגדרות הטלפון","#f59e0b","#3a2500");
+}
 function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
 
 /* ==================== GPS אמיתי ==================== */
@@ -489,7 +491,7 @@ async function sendLocNative(lat,lng){
 async function startGps(){
   if(NATIVE){
     if(bgWatcher)return;
-    try{await LN.requestPermissions()}catch(e){}
+    await setupPush();   // קודם אישור התראות, אחר כך מיקום — לא שני חלונות בבת אחת
     bgWatcher=await BG.addWatcher({
       backgroundTitle:"גלגלים על גלגלים — מחובר",
       backgroundMessage:"המיקום שלך נשלח למנהל",

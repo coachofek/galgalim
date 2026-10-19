@@ -6,9 +6,12 @@
     "useLegacyBridge": true
   },
   "plugins": {
-    "LocalNotifications": {
-      "smallIcon": "ic_stat_wheel",
-      "iconColor": "#EAB308"
+    "PushNotifications": {
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
     }
   }
 }
