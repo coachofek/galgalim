@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="capacitor.js"></script>
 <style>
 :root{--bg:#0f1419;--panel:#161c24;--panel-2:#1d252f;--line:#2a3441;--txt:#e8edf3;--muted:#8b98a8;
  --free:#22c55e;--busy:#f59e0b;--off:#5b6773;--accent:#3b82f6;--gold:#eab308;--violet:#8b5cf6;--red:#ef4444}
@@ -302,8 +303,10 @@ const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
 // באפליקציית האנדרואיד: מעקב ברקע (גם כשהטלפון בכיס) + התראות. בדפדפן: כמו קודם.
 const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNativePlatform());
-const BG=NATIVE?Capacitor.registerPlugin("BackgroundGeolocation"):null;
-const PN=NATIVE?Capacitor.registerPlugin("PushNotifications"):null;
+// תקלה בתוסף אחד לא תפיל את כל האפליקציה
+const plugin=n=>{try{return Capacitor.registerPlugin?Capacitor.registerPlugin(n):(Capacitor.Plugins||{})[n]||null}catch(e){console.error("plugin",n,e);return null}};
+const BG=NATIVE?plugin("BackgroundGeolocation"):null;
+const PN=NATIVE?plugin("PushNotifications"):null;
 let bgWatcher=null;
 
 /* ==================== עזרים ==================== */
@@ -451,7 +454,7 @@ function subscribe(){
 // השרת שולח התראה דרך Firebase על כל הודעה/הצעה/בקשת שחרור — גם כשהאפליקציה סגורה.
 let pushToken=null,pushP=null;
 function setupPush(){
-  if(!NATIVE)return Promise.resolve();
+  if(!NATIVE||!PN)return Promise.resolve();
   return pushP||(pushP=initPush().catch(()=>{}));
 }
 async function initPush(){
@@ -481,7 +484,7 @@ function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
 async function sendLocNative(lat,lng){
   const{data:{session}}=await db.auth.getSession();
   if(!session||!me||me.role!=="driver")return;
-  await Capacitor.Plugins.CapacitorHttp.request({method:"PATCH",
+  await (Capacitor.Plugins.CapacitorHttp||plugin("CapacitorHttp")).request({method:"PATCH",
     url:`${SUPABASE_URL}/rest/v1/drivers?id=eq.${me.driver.id}`,
     headers:{apikey:SUPABASE_KEY,Authorization:"Bearer "+session.access_token,
       "Content-Type":"application/json",Prefer:"return=minimal"},
@@ -489,7 +492,7 @@ async function sendLocNative(lat,lng){
 }
 
 async function startGps(){
-  if(NATIVE){
+  if(NATIVE&&BG){
     if(bgWatcher)return;
     await setupPush();   // קודם אישור התראות, אחר כך מיקום — לא שני חלונות בבת אחת
     bgWatcher=await BG.addWatcher({
