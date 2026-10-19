@@ -1,0 +1,60 @@
+# בדיקה אוטומטית על טלפון אנדרואיד וירטואלי. רצה אחרי כל בנייה, ואפשר גם ידנית.
+name: Android E2E
+
+on:
+  workflow_run:
+    workflows: ["Android APK"]
+    types: [completed]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # גרסת בדיקה: אותו קוד בדיוק, רק עם גישת DevTools כדי שהבדיקה תוכל "ללחוץ" באפליקציה
+      - name: Build test APK
+        run: |
+          npm ci
+          echo "${{ secrets.GOOGLE_SERVICES_B64 }}" | base64 -d > android/app/google-services.json
+          node -e "const f='capacitor.config.json',c=require('./'+f);c.android.webContentsDebuggingEnabled=true;require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+          npx cap sync android
+          cd android && chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/app-debug.apk"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_OWNER_PASSWORD: ${{ secrets.TEST_OWNER_PASSWORD }}
+          TEST_DRIVER_PASSWORD: ${{ secrets.TEST_DRIVER_PASSWORD }}
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: node tests/e2e.cjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results
+          path: e2e-out/

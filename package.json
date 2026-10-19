@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.2",
+    "@supabase/supabase-js": "^2.118.0",
     "node-forge": "^1.4.0"
   }
 }
