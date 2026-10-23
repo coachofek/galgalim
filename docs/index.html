@@ -120,6 +120,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .pin2{display:flex;align-items:center;gap:4px;white-space:nowrap;transform:translate(-7px,-7px)}
 .pin2 .pd{width:13px;height:13px;border-radius:50%;border:2px solid #0c1218;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.25)}
 .pin2.free .pd{background:#22c55e}.pin2.busy .pd{background:#f59e0b}.pin2.off .pd{background:#5b6773}
+.pin2.stale .pd{background:#3a434d;border-style:dashed}.pin2.stale .pl{color:#9aa6b4;font-style:italic}
+.stale-n{color:#d6bb52}.trash{background:none;border:0;color:var(--muted);font-size:13px;cursor:pointer;padding:2px 4px}
 .pin2 .pl{background:rgba(12,18,24,.82);color:#e8edf3;font-size:10px;padding:1px 5px;border-radius:5px;
  border:1px solid rgba(255,255,255,.14)}
 .leaflet-container{background:#0c1218;font-family:inherit}
@@ -311,7 +313,7 @@ const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNative
 const plugin=n=>{try{return Capacitor.registerPlugin?Capacitor.registerPlugin(n):(Capacitor.Plugins||{})[n]||null}catch(e){console.error("plugin",n,e);return null}};
 const BG=NATIVE?plugin("BackgroundGeolocation"):null;
 const PN=NATIVE?plugin("PushNotifications"):null;
-let bgWatcher=null;
+let bgWatcher=null,lastLoc=null;
 
 /* ==================== עזרים ==================== */
 const $=id=>document.getElementById(id);
@@ -331,12 +333,18 @@ async function fetchAll(build){let out=[],from=0;
 // כל הנסיעות שהסתיימו בחודש מסוים — לנהג אחד או לכל הצי
 function monthTrips(ym,driverId){const[y,m]=ym.split("-").map(Number);
   const a=new Date(y,m-1,1).toISOString(),b=new Date(y,m,1).toISOString();
-  return fetchAll(()=>{let q=db.from("trips").select("*").eq("status","done").gte("done_at",a).lt("done_at",b)
+  return fetchAll(()=>{let q=db.from("trips").select("*").eq("status","done").is("deleted_at",null).gte("done_at",a).lt("done_at",b)
     .order("done_at",{ascending:false});if(driverId)q=q.eq("driver_id",driverId);return q})}
 const fleetId=()=>me.role==="owner"?me.fleet.id:me.driver.fleet_id;
 async function tripStats(driverId){const{data}=await db.rpc("trip_stats",{p_fleet:fleetId(),p_driver:driverId||null});
   return data||{count:0,sum:0,months:[]}}
 const sumOf=(rows,k)=>rows.reduce((s,t)=>s+Number(t[k]||0),0);
+// נהג "נעלם": מחובר לצי ולא במצב עסוק, אבל לא שידר מיקום יותר משעה
+const isStale=d=>d.active!==false&&!d.join_pin&&d.status!=="off"&&(!d.last_seen||Date.now()-dt(d.last_seen)>36e5);
+const agoTxt=d=>{if(!d.last_seen)return"מעולם לא שידר מיקום";const m=Math.round((Date.now()-dt(d.last_seen))/6e4);
+  return"לא שידר מיקום "+(m<120?m+" דק׳":Math.round(m/60)+" שע׳")};
+const distM=(a,b)=>{const R=6371e3,r=x=>x*Math.PI/180,dl=r(b.latitude-a.latitude),dn=r(b.longitude-a.longitude);
+  const h=Math.sin(dl/2)**2+Math.cos(r(a.latitude))*Math.cos(r(b.latitude))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h))};
 function payBreak(rows,k){const m={};rows.forEach(t=>{const p=t.pay_method||"לא צוין";m[p]=(m[p]||0)+Number(t[k]||0)});
   const ks=Object.keys(m).sort((a,b)=>m[b]-m[a]);
   return ks.length?`<div class="paybrk">${ks.map(p=>`<span><b>${esc(p)}</b>${ils(m[p])}</span>`).join("")}</div>`:""}
@@ -353,7 +361,8 @@ const tripTable=(rows,empty)=>rows.length?`<table><thead><tr><th>תאריך</th>
     <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span></td>
     <td style="font-size:11px">${esc(t.pay_method||"—")}</td>
     <td class="money">${ils(t.collected_amount)}${t.agreed_amount!=null&&Number(t.agreed_amount)!==Number(t.collected_amount)
-      ?`<br><span class="mut" style="font-size:10px;font-weight:400">סוכם ${ils(t.agreed_amount)}</span>`:""}</td></tr>`).join("")}</tbody>
+      ?`<br><span class="mut" style="font-size:10px;font-weight:400">סוכם ${ils(t.agreed_amount)}</span>`:""}
+      ${me.role==="owner"?`<br><button class="trash" onclick="delTrip('${t.id}')" title="מחק">🗑</button>`:""}</td></tr>`).join("")}</tbody>
   <tfoot><tr class="sumrow"><td colspan="3">סה״כ ${rows.length}</td><td class="money">${ils(sumOf(rows,"collected_amount"))}</td></tr></tfoot></table>`
   :`<div class="empty">${empty}</div>`;
 const LBL={free:"פנוי",busy:"בנסיעה",off:"עסוק"};
@@ -464,7 +473,7 @@ async function loadAll(){
   if(!me)return;
   const q=[
     db.from("drivers").select("*").order("name"),
-    fetchAll(()=>db.from("trips").select("*")
+    fetchAll(()=>db.from("trips").select("*").is("deleted_at",null)
       .or(`status.in.(offered,active,released),created_at.gte.${new Date(Date.now()-3*864e5).toISOString()}`)
       .order("created_at",{ascending:false})).then(data=>({data})),
     db.from("offers").select("*").eq("status","pending"),
@@ -479,11 +488,12 @@ async function loadAll(){
       .gte("created_at",new Date(Date.now()-36e5*24).toISOString()));
   }
   const r=await Promise.all(q);
-  D.drivers=r[0].data||[];D.trips=r[1].data||[];D.offers=r[2].data||[];
+  D.allDrivers=r[0].data||[];D.drivers=D.allDrivers.filter(d=>d.active!==false);
+  D.trips=r[1].data||[];D.offers=r[2].data||[];
   D.releases=r[3].data||[];D.messages=r[4].data||[];
   if(me.role==="owner"){D.journal=r[5].data||[];D.personal=r[6].data||[];D.declines=r[7].data||[];D.closedBids=r[8].data||[]}
-  if(me.role==="driver"&&D.drivers.length)me.driver=D.drivers[0];
-  if(me.role==="owner")D.fleetStats=await tripStats().catch(()=>D.fleetStats);
+  if(me.role==="driver"&&D.allDrivers.length)me.driver=D.allDrivers[0];
+  if(me.role==="owner"){D.fleetStats=await tripStats().catch(()=>D.fleetStats);loadPlaces()}
 }
 
 let reloadT;
@@ -530,6 +540,21 @@ async function initPush(){
   else toast("בלי אישור התראות לא תדע כשמגיעה נסיעה — אפשר לאשר בהגדרות הטלפון","#f59e0b","#3a2500");
 }
 function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
+
+/* ==================== כתובות שמורות ==================== */
+// הכתובות שהכי חוזרות בצי מוצעות בזמן הקלדה בכל שדה איסוף/יעד
+async function loadPlaces(){
+  const{data}=await db.rpc("recent_places",{p_fleet:me.fleet.id});
+  let dl=$("places");if(!dl){dl=document.createElement("datalist");dl.id="places";document.body.appendChild(dl)}
+  dl.innerHTML=(data||[]).map(r=>`<option value="${esc(r.place)}">`).join("");
+}
+
+/* ==================== מחיקת נסיעה (מחיקה רכה) ==================== */
+async function delTrip(id){
+  if(!confirm("למחוק את הנסיעה מההיסטוריה?\nהיא תיעלם מכל המסכים והסיכומים."))return;
+  try{await rpc("delete_trip",{p_trip:id});toast("הנסיעה נמחקה","#ef4444","#fff");
+    if($("dc-hist"))loadDcHist();await loadAll();render()}catch(e){}
+}
 
 /* ==================== היסטוריה לפי חודשים ==================== */
 let myYm=ymOf(new Date()),myHistHtml="";
@@ -587,13 +612,18 @@ async function startGps(){
     bgWatcher=await BG.addWatcher({
       backgroundTitle:"גלגלים על גלגלים — מחובר",
       backgroundMessage:"המיקום שלך נשלח למנהל",
-      requestPermissions:true,stale:false,distanceFilter:25
+      requestPermissions:true,stale:false,distanceFilter:0
     },(loc,e)=>{
       if(e){
         if(e.code==="NOT_AUTHORIZED"&&confirm("בלי גישה למיקום המנהל לא יראה אותך במפה.\nלפתוח הגדרות ולאשר?"))BG.openSettings();
         return;
       }
-      if(loc)sendLocNative(loc.latitude,loc.longitude);
+      if(!loc)return;
+      // שולחים רק בתזוזה של 25 מ׳ ומעלה, או כל 5 דקות גם בעמידה — כדי שהמנהל ידע שהנהג מחובר
+      const now=Date.now();
+      if(lastLoc&&now-lastLoc.t<3e5&&distM(lastLoc,loc)<25)return;
+      lastLoc={t:now,latitude:loc.latitude,longitude:loc.longitude};
+      sendLocNative(loc.latitude,loc.longitude);
     });
     return;
   }
@@ -621,6 +651,13 @@ function timeLeft(o){const ms=new Date(o.expires_at)-new Date();
 
 function renderDriver(){
   const d=me.driver;if(!d)return;
+  if(d.active===false){
+    if(bgWatcher){BG.removeWatcher({id:bgWatcher}).catch(()=>{});bgWatcher=null}
+    $("dv-body").innerHTML=`<div class="card center" style="padding:30px 18px"><div style="font-size:40px">🚫</div>
+      <div class="st" style="margin:10px 0 6px;font-weight:700">החשבון שלך הושבת</div>
+      <div class="mut" style="font-size:13px">המנהל השבית את החשבון שלך בצי.<br>לפרטים — פנה למנהל.</div></div>`;
+    return;
+  }
   $("dv-av").textContent=d.name.split(" ").map(w=>w[0]).join("");
   $("dv-name").textContent=d.name;
   $("dv-sub").textContent=`${d.code} · ${d.vehicle_type||""} · ${d.plate||""}`;
@@ -770,7 +807,7 @@ function paintMap(){
   D.drivers.forEach(d=>{
     if(d.lat==null||d.lng==null)return;
     L.marker([d.lat,d.lng],{icon:L.divIcon({className:"",iconSize:null,
-      html:`<div class="pin2 ${d.status}"><span class="pd"></span><span class="pl">${esc(d.name)} · ${d.code}</span></div>`})})
+      html:`<div class="pin2 ${isStale(d)?"stale":d.status}"><span class="pd"></span><span class="pl">${esc(d.name)} · ${d.code}${isStale(d)?" · ⚠ לא מחובר":""}</span></div>`})})
       .addTo(pinLayer).on("click",()=>openDriverCard(d.id));
     const t=D.trips.find(x=>x.status==="active"&&x.driver_id===d.id);
     if(t&&t.to_lat){
@@ -799,7 +836,7 @@ const openRel=()=>D.releases.filter(r=>["pending","seen"].includes(r.status));
 const pool=()=>D.trips.filter(t=>t.status==="released");
 const todayTrips=()=>{const k=ymd(new Date());
   return D.trips.filter(t=>["active","done","released"].includes(t.status)&&t.accepted_at&&ymd(dt(t.accepted_at))===k)};
-const drvName=id=>{const d=D.drivers.find(x=>x.id===id);return d?`${d.name} (${d.code})`:"—"};
+const drvName=id=>{const d=(D.allDrivers||D.drivers).find(x=>x.id===id);return d?`${d.name} (${d.code})`:"—"};
 
 function renderOwner(){
   const b=$("ow-body");
@@ -859,9 +896,15 @@ function renderOwner(){
         <div class="i"><div class="n1">${esc(d.name)}<span class="code">${d.code}</span></div>
           <div class="n2">🚗 ${esc(d.vehicle_type||"—")} · ${esc(d.plate||"—")}</div>
           <div class="n3">${d.join_pin?`🔑 קוד חיבור: ${d.join_pin} — טרם התחבר`
-            :d.lat?"📍 מיקום מעודכן":"⚪ אין מיקום"}</div></div>
+            :isStale(d)?`<span class="stale-n">⚠ ${agoTxt(d)}</span>`:d.lat?"📍 מיקום מעודכן":"⚪ אין מיקום"}</div></div>
         <span class="badge ${d.status}">${LBL[d.status]}</span></div>`).join("")
-        ||`<div class="empty">אין עדיין נהגים.<br>לחץ "➕ הוסף נהג" כדי להתחיל.</div>`}`;
+        ||`<div class="empty">אין עדיין נהגים.<br>לחץ "➕ הוסף נהג" כדי להתחיל.</div>`}
+      ${D.allDrivers.some(d=>d.active===false)?`<div class="card" style="margin-top:14px"><h4>🚫 נהגים מושבתים — ההיסטוריה שלהם נשמרת</h4>
+        ${D.allDrivers.filter(d=>d.active===false).map(d=>`<div class="drow" style="opacity:.6" onclick="openDriverCard('${d.id}')">
+          <div class="av">${d.name.split(" ").map(w=>w[0]).join("")}</div>
+          <div class="i"><div class="n1">${esc(d.name)}<span class="code">${d.code}</span></div>
+            <div class="n2">🚗 ${esc(d.vehicle_type||"—")} · ${esc(d.plate||"—")}</div></div>
+          <span class="badge off">מושבת</span></div>`).join("")}</div>`:""}`;
   }
 
   if(owPane==="today"){
@@ -883,7 +926,8 @@ function renderOwner(){
         <td style="font-size:11px">${esc(drvName(t.driver_id))}</td>
         <td class="money">${ils(t.collected_amount??t.agreed_amount)}
           ${t.collected_amount!=null&&Number(t.collected_amount)!==Number(t.agreed_amount)
-            ?`<br><span class="mut" style="font-size:9.5px">סוכם ${ils(t.agreed_amount)}</span>`:""}</td></tr>`).join("")}
+            ?`<br><span class="mut" style="font-size:9.5px">סוכם ${ils(t.agreed_amount)}</span>`:""}
+          ${t.status!=="active"?`<br><button class="trash" onclick="delTrip('${t.id}')" title="מחק">🗑</button>`:""}</td></tr>`).join("")}
       </tbody><tfoot><tr class="sumrow"><td colspan="3">סה״כ ${tt.length} · ${done.length} הושלמו</td>
         <td class="money">${ils(col)}</td></tr></tfoot></table>`
       :`<div class="empty">עדיין לא יצאה היום אף נסיעה.</div>`}</div>`;
@@ -938,7 +982,7 @@ async function dropTrip(id){
 
 /* ----- כרטיס נהג ----- */
 function openDriverCard(id,tab="info"){
-  const d=D.drivers.find(x=>x.id===id);if(!d)return;
+  const d=D.allDrivers.find(x=>x.id===id);if(!d)return;const off=d.active===false;
   if(dcId!==id){dcId=id;dcYm=ymOf(new Date())}
   let body=`<div class="tabs">${[["info","פרטים"],["hist","היסטוריה"]].map(([k,l])=>
     `<button class="${tab===k?"on":""}" onclick="openDriverCard('${id}','${k}')">${l}</button>`).join("")}</div>`;
@@ -948,7 +992,7 @@ function openDriverCard(id,tab="info"){
     <tr><td class="mut">סוג רכב</td><td>${esc(d.vehicle_type||"—")}</td></tr>
     <tr><td class="mut">טלפון</td><td>${esc(d.phone||"—")}</td></tr>
     <tr><td class="mut">בסיס</td><td>${esc(d.base_area||"—")}</td></tr>
-    <tr><td class="mut">סטטוס</td><td>${LBL[d.status]}</td></tr>
+    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>`:""}</td></tr>
     <tr><td class="mut">נראה לאחרונה</td><td>${d.last_seen?dt(d.last_seen).toLocaleString("he-IL"):"—"}</td></tr>
     <tr><td class="mut">סה״כ נסיעות</td><td id="dc-cnt">…</td></tr>
     <tr><td class="mut">סה״כ גבייה</td><td class="money" id="dc-sum">…</td></tr>
@@ -959,7 +1003,8 @@ function openDriverCard(id,tab="info"){
       :`<button class="btn s sm" style="margin-top:12px" onclick="doResetPin('${id}')">🔑 צור קוד חיבור חדש</button>`}`;
   if(tab==="hist")body+=`<div id="dc-hist"><div class="empty">טוען…</div></div>`;
   sheet(`${esc(d.name)} <span class="code">${d.code}</span>`,body,
-    `<button class="btn d sm" onclick="doRemove('${id}')">🗑</button>
+    off?`<button class="btn ok" onclick="setActive('${id}',true)">♻ החזר לפעילות</button>`
+    :`<button class="btn d sm" onclick="setActive('${id}',false)">🚫 השבת</button>
      <button class="btn s sm" onclick="openPM('${id}')">✉ הודעה</button>
      ${d.status==="free"?`<button class="btn p sm" onclick="openTrip('${id}')">שלח נסיעה</button>`:""}`);
   if(tab==="hist")loadDcHist();else fillDcTotals(id);
@@ -971,12 +1016,13 @@ async function doResetPin(id){
       `<button class="btn p" onclick="closeSheet()">סגור</button>`);
     await loadAll();render()}catch(e){}
 }
-async function doRemove(id){
-  const d=D.drivers.find(x=>x.id===id);
-  if(!confirm(`להסיר את ${d.name} (${d.code})?`))return;
-  const{error}=await db.from("drivers").delete().eq("id",id);
-  if(error)return err(error.message);
-  closeSheet();toast(`${d.name} הוסר`,"#ef4444","#fff");await loadAll();render();
+// השבתה במקום מחיקה: כל ההיסטוריה נשמרת, ואפשר להחזיר בלחיצה
+async function setActive(id,on){
+  const d=D.allDrivers.find(x=>x.id===id);
+  if(!on&&!confirm(`להשבית את ${d.name} (${d.code})?\n\nהוא לא יקבל נסיעות והודעות ולא יוכל לפעול באפליקציה.\nכל ההיסטוריה שלו נשמרת, ואפשר להחזיר אותו בכל רגע.`))return;
+  try{await rpc("set_driver_active",{p_driver:id,p_active:on});
+    closeSheet();toast(on?`${d.name} חזר לפעילות`:`${d.name} הושבת`,on?"#22c55e":"#5b6773",on?"#04240f":"#fff");
+    await loadAll();render()}catch(e){}
 }
 function openAdd(){
   sheet("➕ הוספת נהג",
@@ -1003,8 +1049,8 @@ async function doAdd(){
 function openTrip(id,journalId){
   const d=D.drivers.find(x=>x.id===id);
   sheet(`שליחת נסיעה — ${esc(d.name)}`,
-    `<div class="fld"><label>כתובת איסוף</label><input id="t-from" placeholder="יפו 20, ירושלים"></div>
-     <div class="fld"><label>יעד</label><input id="t-to" placeholder="נתב״ג"></div>
+    `<div class="fld"><label>כתובת איסוף</label><input id="t-from" list="places" autocomplete="off" placeholder="יפו 20, ירושלים"></div>
+     <div class="fld"><label>יעד</label><input id="t-to" list="places" autocomplete="off" placeholder="נתב״ג"></div>
      <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="t-amt" type="number" placeholder="150"></div>
      <div class="fld"><label>תשלום</label><select id="t-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>
      <div class="fld"><label>הערה לנהג</label><input id="t-note" placeholder="רשות"></div>
@@ -1044,8 +1090,8 @@ function openBroadcast(){
       <option value="bid">🚕 מכרז נסיעה — הנהגים מאשרים או דוחים</option>
       <option value="msg">💬 הודעה כללית בלבד</option></select></div>
      <div id="b-bid"><div class="priv">יישלח ל-${free} נהגים (פנויים + עסוקים; מי שבאמצע נסיעה לא יקבל). הראשון שיאשר מקבל.</div>
-       <div class="fld"><label>איסוף</label><input id="b-from" placeholder="יפו 20, ירושלים"></div>
-       <div class="fld"><label>יעד</label><input id="b-dest" placeholder="נתב״ג"></div>
+       <div class="fld"><label>איסוף</label><input id="b-from" list="places" autocomplete="off" placeholder="יפו 20, ירושלים"></div>
+       <div class="fld"><label>יעד</label><input id="b-dest" list="places" autocomplete="off" placeholder="נתב״ג"></div>
        <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="b-amt" type="number"></div>
        <div class="fld"><label>תשלום</label><select id="b-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>
        <div class="fld"><label>הערה</label><input id="b-note"></div></div>
@@ -1150,8 +1196,8 @@ function calEdit(id){
   sheet(e?"✏ עריכת נסיעה":"➕ נסיעה מתוכננת",
     `<div class="two"><div class="fld"><label>תאריך</label><input id="e-date" type="date" value="${e?e.entry_date:calSel}"></div>
      <div class="fld"><label>שעה</label><input id="e-time" type="time" value="${e?e.entry_time.slice(0,5):"08:00"}"></div></div>
-     <div class="fld"><label>🟢 איסוף</label><input id="e-from" value="${e?esc(e.from_text||((e.title||"").split("←")[0]||"").trim()):""}" placeholder="יפו 20, ירושלים"></div>
-     <div class="fld"><label>🔴 יעד</label><input id="e-to" value="${e?esc(e.to_text||((e.title||"").split("←")[1]||"").trim()):""}" placeholder="נתב״ג"></div>
+     <div class="fld"><label>🟢 איסוף</label><input id="e-from" list="places" autocomplete="off" value="${e?esc(e.from_text||((e.title||"").split("←")[0]||"").trim()):""}" placeholder="יפו 20, ירושלים"></div>
+     <div class="fld"><label>🔴 יעד</label><input id="e-to" list="places" autocomplete="off" value="${e?esc(e.to_text||((e.title||"").split("←")[1]||"").trim()):""}" placeholder="נתב״ג"></div>
      <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="e-amt" type="number" value="${e&&e.amount!=null?e.amount:""}" placeholder="150"></div>
      <div class="fld"><label>תשלום</label><select id="e-pay">${PAY.map(p=>`<option${e&&e.pay_method===p?" selected":""}>${p}</option>`).join("")}</select></div></div>
      <div class="fld"><label>הערות אישיות (פרטי)</label><textarea id="e-note">${e?esc(e.private_note||""):""}</textarea></div>`,
@@ -1165,7 +1211,7 @@ async function calSave(id){
   if(!from&&!to)return err("נא למלא איסוף או יעד");
   const title=[from,to].filter(Boolean).join(" ← ");
   const row={fleet_id:me.fleet.id,entry_date:date,entry_time:time,title,private_note:note||null,
-    from_text:from||null,to_text:to||null,amount:amt,pay_method:val("e-pay")};
+    from_text:from||null,to_text:to||null,amount:amt,pay_method:val("e-pay"),notified:false};
   const{error}=id?await db.from("journal_entries").update(row).eq("id",id)
                  :await db.from("journal_entries").insert(row);
   if(error)return err(error.message);
@@ -1206,8 +1252,8 @@ function calMove(id){
      <div class="fld"><label>למי להעביר?</label><select id="mv-to">
        <option value="bid">📣 מכרז — כל הנהגים (${D.drivers.filter(d=>d.status!=="busy").length})</option>
        ${free.map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.code}</option>`).join("")}</select></div>
-     <div class="two"><div class="fld"><label>איסוף</label><input id="mv-from" value="${esc(e.from_text||(parts[0]||"").trim())}"></div>
-     <div class="fld"><label>יעד</label><input id="mv-dest" value="${esc(e.to_text||(parts[1]||"").trim())}"></div></div>
+     <div class="two"><div class="fld"><label>איסוף</label><input id="mv-from" list="places" autocomplete="off" value="${esc(e.from_text||(parts[0]||"").trim())}"></div>
+     <div class="fld"><label>יעד</label><input id="mv-dest" list="places" autocomplete="off" value="${esc(e.to_text||(parts[1]||"").trim())}"></div></div>
      <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="mv-amt" type="number" value="${e.amount??""}"></div>
      <div class="fld"><label>תשלום</label><select id="mv-pay">${PAY.map(p=>`<option${e.pay_method===p?" selected":""}>${p}</option>`).join("")}</select></div></div>`,
     `<button class="btn s" onclick="closeSheet()">ביטול</button>
@@ -1230,6 +1276,11 @@ async function calCancel(id){
   toast("ההעברה בוטלה","#8b5cf6","#fff");await loadAll();render();
 }
 let phYm=ymOf(new Date());
+async function delPersonal(id){
+  if(!confirm("למחוק את הנסיעה מההיסטוריה שלך?"))return;
+  const{error}=await db.from("personal_trips").delete().eq("id",id);
+  if(error)return err(error.message);toast("נמחק","#ef4444","#fff");await loadAll();render();
+}
 function phShift(n){phYm=ymShift(phYm,n);renderCal()}
 function phGo(ym){phYm=ym;renderCal()}
 function histHtml(){
@@ -1247,7 +1298,7 @@ function histHtml(){
       ${rows.map(t=>`<tr><td>${t.entry_date.slice(8)}/${t.entry_date.slice(5,7)}<br><span class="mut" style="font-size:10px">${t.entry_time.slice(0,5)}</span></td>
         <td style="font-size:11.5px">${esc(t.title)}${t.summary?`<br><span class="mut">${esc(t.summary)}</span>`:""}</td>
         <td style="font-size:11px">${esc(t.pay_method||"—")}</td>
-        <td class="money">${ils(t.amount)}</td></tr>`).join("")}</tbody>
+        <td class="money">${ils(t.amount)}<br><button class="trash" onclick="delPersonal('${t.id}')" title="מחק">🗑</button></td></tr>`).join("")}</tbody>
       <tfoot><tr class="sumrow"><td colspan="3">סה״כ ${rows.length}</td><td class="money">${ils(sum)}</td></tr></tfoot></table>`
       :`<div class="empty">אין נסיעות בחודש הזה</div>`}</div>
     ${monthsTable(months,"phGo",phYm)}
