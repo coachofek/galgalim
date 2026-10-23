@@ -318,7 +318,7 @@ const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${Str
 const hm=d=>String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
 const dt=s=>new Date(s);
 const LBL={free:"פנוי",busy:"בנסיעה",off:"עסוק"};
-const PAY=["מזומן","אשראי","הקפה / חשבונית"];
+const PAY=["מזומן","אשראי","הקפה / חשבונית","פתק"];
 const VTYPES=["מונית","רכב פרטי","מסחרי סגור","טנדר","מיניבוס 14 מקומות","משאית 12 טון"];
 const REASONS=["תקלה ברכב / פנצ׳ר","תאונה","בעיה רפואית","בעיה אישית דחופה","הלקוח ביטל","אחר"];
 const BASES=["ירושלים — מרכז העיר","ירושלים — גבעת שאול","ירושלים — תלפיות","ירושלים — פסגת זאב",
@@ -434,11 +434,13 @@ async function loadAll(){
     q.push(db.from("journal_entries").select("*"));
     q.push(db.from("personal_trips").select("*"));
     q.push(db.from("offer_declines").select("*"));
+    q.push(db.from("offers").select("*").eq("target","bid").in("status",["declined","expired"])
+      .gte("created_at",new Date(Date.now()-36e5*24).toISOString()));
   }
   const r=await Promise.all(q);
   D.drivers=r[0].data||[];D.trips=r[1].data||[];D.offers=r[2].data||[];
   D.releases=r[3].data||[];D.messages=r[4].data||[];
-  if(me.role==="owner"){D.journal=r[5].data||[];D.personal=r[6].data||[];D.declines=r[7].data||[]}
+  if(me.role==="owner"){D.journal=r[5].data||[];D.personal=r[6].data||[];D.declines=r[7].data||[];D.closedBids=r[8].data||[]}
   if(me.role==="driver"&&D.drivers.length)me.driver=D.drivers[0];
 }
 
@@ -452,7 +454,15 @@ function subscribe(){
 
 /* ==================== התראות פוש (אפליקציה בלבד) ==================== */
 // השרת שולח התראה דרך Firebase על כל הודעה/הצעה/בקשת שחרור — גם כשהאפליקציה סגורה.
-let pushToken=null,pushP=null;
+let pushToken=null,pushP=null,actx=null;
+// צפצוף כפול קצר — כשהאפליקציה פתוחה המערכת לא משמיעה צליל משלה
+function beep(){
+  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume();
+    [0,.28].forEach(t=>{const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=880;
+      g.gain.setValueAtTime(.0001,actx.currentTime+t);g.gain.exponentialRampToValueAtTime(.5,actx.currentTime+t+.02);
+      g.gain.exponentialRampToValueAtTime(.0001,actx.currentTime+t+.22);o.connect(g).connect(actx.destination);
+      o.start(actx.currentTime+t);o.stop(actx.currentTime+t+.24)})}catch(e){}
+}
 function setupPush(){
   if(!NATIVE||!PN)return Promise.resolve();
   return pushP||(pushP=initPush().catch(()=>{}));
@@ -466,6 +476,7 @@ async function initPush(){
   // כשהאפליקציה פתוחה המערכת לא מציגה את ההתראה — מציגים בעצמנו ומרעידים
   PN.addListener("pushNotificationReceived",n=>{
     toast((n.title||"")+(n.body?" — "+n.body:""),"#eab308","#2a2000");
+    beep();
     try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}
   });
   PN.addListener("pushNotificationActionPerformed",()=>{
@@ -536,7 +547,7 @@ function renderDriver(){
   $("dv-name").textContent=d.name;
   $("dv-sub").textContent=`${d.code} · ${d.vehicle_type||""} · ${d.plate||""}`;
   const b=$("dv-body"),t=myTrip(),unread=D.messages.filter(m=>!m.read_at&&m.driver_id===d.id).length;
-  setBadge("dv-b-msgs",unread);setBadge("dv-b-home",d.status==="free"?myOffers().length:0);
+  setBadge("dv-b-msgs",unread);setBadge("dv-b-home",d.status!=="busy"?myOffers().length:0);
 
   if(dvPane==="home"){
     let h=`<div class="card statusbox">
@@ -544,7 +555,7 @@ function renderDriver(){
       <div class="st">${d.status==="free"?"אתה פנוי":d.status==="busy"?"אתה בנסיעה":"אתה עסוק"}</div>
       <div class="ex">${d.status==="free"?"אתה מקבל הצעות נסיעה והמנהל רואה אותך במפה"
         :d.status==="busy"?"סיים את הנסיעה הנוכחית כדי לקבל הצעות חדשות"
-        :"אינך מקבל הצעות נסיעה כרגע"}</div>
+        :"מכרזים עדיין מגיעים אליך — אפשר לקחת אם מתאים"}</div>
       ${d.status!=="busy"?`<button class="btn ${d.status==="free"?"s":"ok"}" onclick="toggleAvail()">
         ${d.status==="free"?"עבור למצב עסוק":"חזור למצב פנוי"}</button>`:""}
       ${d.lat?`<div class="ex" style="margin-top:10px">📍 המיקום שלך משודר למנהל</div>`
@@ -570,7 +581,7 @@ function renderDriver(){
             עד לאישור — הנסיעה עדיין באחריותך.</div>`
           :`<button class="btn no" onclick="askRelease('${t.id}')">🆘 בקשת שחרור מהנסיעה</button>`}</div>`;
     }
-    if(d.status==="free"){
+    if(d.status!=="busy"){
       const os=myOffers();
       h+=os.length?os.map(o=>{const tr=tripOf(o);if(!tr)return"";
         return`<div class="offer">
@@ -760,6 +771,14 @@ function renderOwner(){
           <div class="nt">${o.target==="bid"?"📣 מכרז לכל הפנויים":"🎯 "+esc(drvName(o.target))} · ${ils(t.agreed_amount)}
             <br>⏳ ${timeLeft(o)}${D.declines.filter(x=>x.offer_id===o.id).length
               ?` · ${D.declines.filter(x=>x.offer_id===o.id).length} סימנו "לא יכול"`:""}</div>
+          ${o.target==="bid"?`<div class="ea"><button class="mv" onclick="resendBid('${o.id}')">🔔 שלח שוב לכולם</button></div>`:""}
+          </div>`:""}).join("")}</div>`:""}
+      ${(D.closedBids||[]).filter(o=>{const t=tripOf(o);return t&&t.status==="cancelled"}).length?`<div class="card" style="border-color:var(--busy)">
+        <h4>📣 מכרזים שאף אחד לא לקח</h4>
+        ${D.closedBids.map(o=>{const t=tripOf(o);return t&&t.status==="cancelled"?`<div class="ent">
+          <div class="ti">${esc(t.from_text)} ← ${esc(t.to_text)}</div>
+          <div class="nt">${ils(t.agreed_amount)} · ${o.status==="expired"?"⏰ פג תוקף":"❌ כולם סימנו לא יכול"}</div>
+          <div class="ea"><button class="ok" onclick="resendBid('${o.id}')">🔁 שלח שוב לכל הנהגים</button></div>
           </div>`:""}).join("")}</div>`:""}`;
     const slot=$("map-slot");if(slot&&!mapFs)slot.appendChild(ensureHost());
     paintMap();if(lmap)setTimeout(()=>lmap.invalidateSize(),0);
@@ -964,12 +983,12 @@ async function doSendPM(id){
   closeSheet();toast("ההודעה נשלחה");await loadAll();render();
 }
 function openBroadcast(){
-  const free=D.drivers.filter(d=>d.status==="free").length;
+  const free=D.drivers.filter(d=>d.status!=="busy").length;
   sheet("📣 מכרז / הודעה לכולם",
     `<div class="fld"><label>סוג השליחה</label><select id="b-kind" onchange="bKind()">
       <option value="bid">🚕 מכרז נסיעה — הנהגים מאשרים או דוחים</option>
       <option value="msg">💬 הודעה כללית בלבד</option></select></div>
-     <div id="b-bid"><div class="priv">יישלח ל-${free} הנהגים הפנויים. הראשון שיאשר מקבל.</div>
+     <div id="b-bid"><div class="priv">יישלח ל-${free} נהגים (פנויים + עסוקים; מי שבאמצע נסיעה לא יקבל). הראשון שיאשר מקבל.</div>
        <div class="fld"><label>איסוף</label><input id="b-from" placeholder="יפו 20, ירושלים"></div>
        <div class="fld"><label>יעד</label><input id="b-dest" placeholder="נתב״ג"></div>
        <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="b-amt" type="number"></div>
@@ -987,7 +1006,7 @@ async function doBroadcast(){
     const from=val("b-from").trim(),to=val("b-dest").trim(),amt=+val("b-amt")||0;
     if(!from||!to)return err("נא למלא איסוף ויעד");
     if(!amt)return err("נא להזין סכום גבייה");
-    if(!D.drivers.filter(d=>d.status==="free").length)return err("אין כרגע נהגים פנויים");
+    if(!D.drivers.filter(d=>d.status!=="busy").length)return err("כל הנהגים באמצע נסיעה");
     const f=resolveLL(from),t=resolveLL(to);
     try{await rpc("send_offer",{p_fleet:me.fleet.id,p_target:"bid",p_from:from,p_from_lat:f[0],p_from_lng:f[1],
         p_to:to,p_to_lat:t[0],p_to_lng:t[1],p_amount:amt,p_pay:val("b-pay"),p_note:val("b-note")||null,
@@ -1002,12 +1021,16 @@ async function doBroadcast(){
   if(error)return err(error.message);
   closeSheet();toast(`נשלח ל-${rows.length} נהגים`,"#eab308","#241f00");await loadAll();render();
 }
+async function resendBid(id){
+  try{await rpc("resend_bid",{p_offer:id});
+    toast("המכרז נשלח שוב לכל הנהגים 🔔","#eab308","#241f00");await loadAll();render()}catch(e){}
+}
 function openReassign(id){
   const t=D.trips.find(x=>x.id===id),free=D.drivers.filter(d=>d.status==="free");
   sheet("↗ שיבוץ מחדש",
     `<div class="priv"><b>${esc(t.from_text)} ← ${esc(t.to_text)}</b></div>
      <div class="fld"><label>למי להעביר?</label><select id="rs-to">
-       <option value="bid">📣 מכרז — כל הפנויים (${free.length})</option>
+       <option value="bid">📣 מכרז — כל הנהגים (${D.drivers.filter(d=>d.status!=="busy").length})</option>
        ${free.map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.code}</option>`).join("")}</select></div>
      <div class="fld"><label>גבייה (₪)</label><input id="rs-amt" type="number" value="${t.agreed_amount}"></div>`,
     `<button class="btn s" onclick="closeSheet()">ביטול</button>
@@ -1050,6 +1073,7 @@ function calHtml(){
         <span class="tm">${e.entry_time.slice(0,5)}</span>
         ${pend?`<span class="badge pend">⏳ ממתין לאישור</span>`:""}</div>
       <div class="ti">${esc(e.title)}</div>
+      ${e.amount!=null?`<div class="nt">💰 ${ils(e.amount)}${e.pay_method?" · "+esc(e.pay_method):""}</div>`:""}
       ${e.private_note?`<div class="nt">📝 ${esc(e.private_note)}</div>`:""}
       <div class="ea">${pend?`<button onclick="calCancel('${e.id}')">בטל העברה</button>`
         :`<button class="ok" onclick="calDone('${e.id}')">✅ בוצעה</button>
@@ -1071,16 +1095,22 @@ function calEdit(id){
   sheet(e?"✏ עריכת נסיעה":"➕ נסיעה מתוכננת",
     `<div class="two"><div class="fld"><label>תאריך</label><input id="e-date" type="date" value="${e?e.entry_date:calSel}"></div>
      <div class="fld"><label>שעה</label><input id="e-time" type="time" value="${e?e.entry_time.slice(0,5):"08:00"}"></div></div>
-     <div class="fld"><label>הנסיעה</label><input id="e-what" value="${e?esc(e.title):""}" placeholder="יפו 20 ← נתב״ג"></div>
+     <div class="fld"><label>🟢 איסוף</label><input id="e-from" value="${e?esc(e.from_text||((e.title||"").split("←")[0]||"").trim()):""}" placeholder="יפו 20, ירושלים"></div>
+     <div class="fld"><label>🔴 יעד</label><input id="e-to" value="${e?esc(e.to_text||((e.title||"").split("←")[1]||"").trim()):""}" placeholder="נתב״ג"></div>
+     <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="e-amt" type="number" value="${e&&e.amount!=null?e.amount:""}" placeholder="150"></div>
+     <div class="fld"><label>תשלום</label><select id="e-pay">${PAY.map(p=>`<option${e&&e.pay_method===p?" selected":""}>${p}</option>`).join("")}</select></div></div>
      <div class="fld"><label>הערות אישיות (פרטי)</label><textarea id="e-note">${e?esc(e.private_note||""):""}</textarea></div>`,
     `<button class="btn s" onclick="closeSheet()">ביטול</button>
      <button class="btn v" onclick="calSave('${id||""}')">שמור</button>`);
 }
 async function calSave(id){
-  const date=val("e-date"),time=val("e-time"),title=val("e-what").trim(),note=val("e-note").trim();
+  const date=val("e-date"),time=val("e-time"),note=val("e-note").trim();
+  const from=val("e-from").trim(),to=val("e-to").trim(),amt=val("e-amt")===""?null:+val("e-amt");
   if(!date||!time)return err("נא לבחור תאריך ושעה");
-  if(!title)return err("נא לכתוב מה הנסיעה");
-  const row={fleet_id:me.fleet.id,entry_date:date,entry_time:time,title,private_note:note||null};
+  if(!from&&!to)return err("נא למלא איסוף או יעד");
+  const title=[from,to].filter(Boolean).join(" ← ");
+  const row={fleet_id:me.fleet.id,entry_date:date,entry_time:time,title,private_note:note||null,
+    from_text:from||null,to_text:to||null,amount:amt,pay_method:val("e-pay")};
   const{error}=id?await db.from("journal_entries").update(row).eq("id",id)
                  :await db.from("journal_entries").insert(row);
   if(error)return err(error.message);
@@ -1097,8 +1127,8 @@ function calDone(id){
   sheet("✅ סיום נסיעה",
     `<div class="priv" style="background:rgba(34,197,94,.1);border-color:rgba(34,197,94,.3)">
       <b>${esc(e.title)}</b><br>${e.entry_date} · ${e.entry_time.slice(0,5)}</div>
-     <div class="two"><div class="fld"><label>סכום שנגבה (₪)</label><input id="dn-amt" type="number"></div>
-     <div class="fld"><label>תשלום</label><select id="dn-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>
+     <div class="two"><div class="fld"><label>סכום שנגבה (₪)</label><input id="dn-amt" type="number" value="${e.amount??""}"></div>
+     <div class="fld"><label>תשלום</label><select id="dn-pay">${PAY.map(p=>`<option${e.pay_method===p?" selected":""}>${p}</option>`).join("")}</select></div></div>
      <div class="fld"><label>הערת סיכום</label><input id="dn-note"></div>`,
     `<button class="btn s" onclick="closeSheet()">ביטול</button>
      <button class="btn ok" onclick="calSaveDone('${id}')">שמור בהיסטוריה שלי</button>`);
@@ -1114,17 +1144,17 @@ async function calSaveDone(id){
   closeSheet();toast(`נשמר בהיסטוריה שלך · ${ils(amt)}`);await loadAll();render();
 }
 function calMove(id){
-  const e=D.journal.find(x=>x.id===id),free=D.drivers.filter(d=>d.status==="free");
-  const parts=e.title.split("←");
+  const e=D.journal.find(x=>x.id===id),free=D.drivers.filter(d=>d.status!=="busy");
+  const parts=(e.title||"").split("←");
   sheet("↗ העברת נסיעה",
     `<div class="priv"><b>${esc(e.title)}</b><br>ההערות האישיות שלך לא נשלחות לנהג.</div>
      <div class="fld"><label>למי להעביר?</label><select id="mv-to">
-       <option value="bid">📣 מכרז — כל הפנויים (${free.length})</option>
+       <option value="bid">📣 מכרז — כל הנהגים (${D.drivers.filter(d=>d.status!=="busy").length})</option>
        ${free.map(d=>`<option value="${d.id}">${esc(d.name)} · ${d.code}</option>`).join("")}</select></div>
-     <div class="two"><div class="fld"><label>איסוף</label><input id="mv-from" value="${esc((parts[0]||"").trim())}"></div>
-     <div class="fld"><label>יעד</label><input id="mv-dest" value="${esc((parts[1]||"").trim())}"></div></div>
-     <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="mv-amt" type="number"></div>
-     <div class="fld"><label>תשלום</label><select id="mv-pay">${PAY.map(p=>`<option>${p}</option>`).join("")}</select></div></div>`,
+     <div class="two"><div class="fld"><label>איסוף</label><input id="mv-from" value="${esc(e.from_text||(parts[0]||"").trim())}"></div>
+     <div class="fld"><label>יעד</label><input id="mv-dest" value="${esc(e.to_text||(parts[1]||"").trim())}"></div></div>
+     <div class="two"><div class="fld"><label>גבייה (₪)</label><input id="mv-amt" type="number" value="${e.amount??""}"></div>
+     <div class="fld"><label>תשלום</label><select id="mv-pay">${PAY.map(p=>`<option${e.pay_method===p?" selected":""}>${p}</option>`).join("")}</select></div></div>`,
     `<button class="btn s" onclick="closeSheet()">ביטול</button>
      <button class="btn g" onclick="calSendMove('${id}')">שלח לאישור</button>`);
 }
