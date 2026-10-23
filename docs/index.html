@@ -174,6 +174,11 @@ td{padding:7px 6px;border-bottom:1px solid var(--line)}
 .paybrk span{background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:11.5px}
 .paybrk b{color:var(--muted);font-weight:600;margin-inline-end:4px}
 tr.go{cursor:pointer}tr.go:hover td{background:var(--panel-2)}
+.settle{border-radius:11px;padding:11px 12px;margin-top:9px;font-weight:700;font-size:13.5px;text-align:center}
+.settle.in{background:rgba(34,197,94,.13);color:var(--free);border:1px solid rgba(34,197,94,.35)}
+.settle.out{background:rgba(245,158,11,.13);color:var(--busy);border:1px solid rgba(245,158,11,.35)}
+.settle.zero{background:var(--panel-2);color:var(--muted);border:1px solid var(--line)}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0}.kv span:first-child{color:var(--muted)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
 .tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);
  padding:10px 4px;font-size:12.5px;font-family:inherit;cursor:pointer}
@@ -541,6 +546,59 @@ async function initPush(){
 }
 function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
 
+/* ==================== דוח חודשי והתחשבנות ==================== */
+// שורה תחתונה: net חיובי → הנהג מעביר למנהל; שלילי → המנהל מעביר לנהג
+async function settlement(ym,driverId){
+  const{data,error}=await db.rpc("month_settlement",{p_fleet:fleetId(),p_ym:ym,p_driver:driverId||null});
+  if(error){err(error.message);return[]}return data||[]}
+const settleLine=(r,who)=>{const n=Number(r.net);
+  if(Math.abs(n)<.01)return`<div class="settle zero">✔ מאוזן — אין העברות החודש</div>`;
+  return who==="owner"
+    ?(n>0?`<div class="settle in">👉 ${esc(r.name)} מעביר לך ${ils(n)}</div>`:`<div class="settle out">👉 אתה מעביר ל${esc(r.name)} ${ils(-n)}</div>`)
+    :(n>0?`<div class="settle out">👉 אתה מעביר למנהל ${ils(n)}</div>`:`<div class="settle in">👉 המנהל מעביר לך ${ils(-n)}</div>`)};
+const settleKv=r=>`<div class="kv"><span>נסיעות</span><span>${r.trips}</span></div>
+  <div class="kv"><span>סה״כ גבייה</span><span class="money">${ils(r.total)}</span></div>
+  <div class="kv"><span>עמלה (<bdi>${trimN(r.pct)}%</bdi>)</span><span>${ils(r.commission)}</span></div>
+  <div class="kv"><span>פתקים — הכסף אצל המנהל</span><span>${ils(r.note_total)}</span></div>`;
+const trimN=n=>String(Number(n));
+const waPhone=ph=>{let d=String(ph||"").replace(/\D/g,"");if(d.startsWith("0"))d="972"+d.slice(1);return d.length>=11?d:""};
+function openWa(phone,text){window.open(`https://wa.me/${waPhone(phone)}?text=${encodeURIComponent(text)}`,"_blank")}
+const settleText=(r,ym)=>{const n=Number(r.net);
+  return`סיכום ${ymLabel(ym)} — גלגלים על גלגלים\n${r.name} (${r.code})\n\n`+
+    `נסיעות: ${r.trips}\nסה״כ גבייה: ${ils(r.total)}\nעמלה (${trimN(r.pct)}%): ${ils(r.commission)}\nפתקים (הכסף אצלי): ${ils(r.note_total)}\n\n`+
+    (Math.abs(n)<.01?"✔ מאוזן — אין העברות":n>0?`👉 אתה מעביר לי ${ils(n)}`:`👉 אני מעביר לך ${ils(-n)}`)};
+
+let repYm=ymOf(new Date()),repRows=[];
+function openReport(){sheet("📊 דוח חודשי והתחשבנות",`<div id="rep"><div class="empty">טוען…</div></div>`,
+  `<button class="btn s sm" onclick="closeSheet()">סגור</button>
+   <button class="btn g sm" onclick="shareReport()">📤 שתף דוח מלא</button>`);loadReport()}
+function repShift(n){repYm=ymShift(repYm,n);const b=$("rep");if(b)b.innerHTML='<div class="empty">טוען…</div>';loadReport()}
+async function loadReport(){
+  const ym=repYm,rows=await settlement(ym);const box=$("rep");if(!box||ym!==repYm)return;repRows=rows;
+  const T=k=>rows.reduce((a,r)=>a+Number(r[k]||0),0);
+  const toYou=rows.filter(r=>r.net>0).reduce((a,r)=>a+Number(r.net),0),fromYou=rows.filter(r=>r.net<0).reduce((a,r)=>a-Number(r.net),0);
+  box.innerHTML=monthNav(ym,"repShift")+(rows.length?`
+    <div class="stats2">
+      <div class="stat" style="--c:#3b82f6"><div class="n">${T("trips")}</div><div class="l">נסיעות בצי</div></div>
+      <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(T("total"))}</div><div class="l">גבייה בצי</div></div>
+      <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${ils(T("commission"))}</div><div class="l">העמלות שלך</div></div>
+      <div class="stat" style="--c:#8b5cf6"><div class="n" style="font-size:17px">${ils(T("note_total"))}</div><div class="l">פתקים אצלך</div></div></div>
+    <div class="card"><div class="kv"><span>נהגים מעבירים לך</span><span class="money">${ils(toYou)}</span></div>
+      <div class="kv"><span>אתה מעביר לנהגים</span><span style="color:var(--busy);font-weight:700">${ils(fromYou)}</span></div></div>
+    ${rows.map((r,i)=>`<div class="card"><h4 style="color:var(--txt)">${esc(r.name)} <span class="code">${r.code}</span></h4>
+      ${settleKv(r)}${payBreak(Object.entries(r.by_pay||{}).map(([pay_method,v])=>({pay_method,v})),"v")}
+      ${settleLine(r,"owner")}
+      <button class="btn s sm" style="margin-top:9px" onclick="openWa(repRows[${i}].phone,settleText(repRows[${i}],repYm))">📤 שלח ל${esc(r.name)} בוואטסאפ</button></div>`).join("")}`
+    :`<div class="empty">אין נסיעות שהושלמו ב${ymLabel(ym)}</div>`);
+}
+function shareReport(){
+  if(!repRows.length)return err("אין נתונים לחודש הזה");
+  const lines=repRows.map(r=>{const n=Number(r.net);
+    return`• ${r.name}: ${r.trips} נסיעות · ${ils(r.total)} · עמלה ${ils(r.commission)} · פתקים ${ils(r.note_total)} → `+
+      (Math.abs(n)<.01?"מאוזן":n>0?`מעביר לי ${ils(n)}`:`אני מעביר ${ils(-n)}`)});
+  openWa("",`דוח ${ymLabel(repYm)} — גלגלים על גלגלים\n\n${lines.join("\n")}`);
+}
+
 /* ==================== כתובות שמורות ==================== */
 // הכתובות שהכי חוזרות בצי מוצעות בזמן הקלדה בכל שדה איסוף/יעד
 async function loadPlaces(){
@@ -560,14 +618,18 @@ async function delTrip(id){
 let myYm=ymOf(new Date()),myHistHtml="";
 async function loadMyHist(){
   const ym=myYm,id=me.driver.id;
-  const[rows,s]=await Promise.all([monthTrips(ym,id),tripStats(id)]);
-  if(ym!==myYm)return;const sum=sumOf(rows,"collected_amount");
+  const[rows,s,st]=await Promise.all([monthTrips(ym,id),tripStats(id),settlement(ym,id)]);
+  if(ym!==myYm)return;const sum=sumOf(rows,"collected_amount"),r=st[0];
   myHistHtml=monthNav(ym,"myShift")+`<div class="stats2">
     <div class="stat" style="--c:#3b82f6"><div class="n">${rows.length}</div><div class="l">נסיעות בחודש</div></div>
     <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(sum)}</div><div class="l">גבייה בחודש</div></div>
     <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${rows.length?ils(Math.round(sum/rows.length)):"₪0"}</div><div class="l">ממוצע לנסיעה</div></div>
     <div class="stat" style="--c:#8b5cf6"><div class="n">${s.count}</div><div class="l">סה״כ נסיעות</div></div></div>
     ${payBreak(rows,"collected_amount")}
+    ${r?`<div class="card" style="border-color:var(--free)"><h4>💰 הרווח שלך ב${ymLabel(ym)}</h4>
+      <div class="center"><div class="big money">${ils(Number(r.total)-Number(r.commission))}</div>
+        <div class="mut" style="font-size:11px">אחרי עמלה של <bdi>${trimN(r.pct)}%</bdi></div></div>
+      <div style="height:8px"></div>${settleKv(r)}${settleLine(r,"driver")}</div>`:""}
     <div class="card"><h4>הנסיעות ב${ymLabel(ym)}</h4>${tripTable(rows,"אין נסיעות בחודש הזה")}</div>
     ${monthsTable(s.months,"myGo",ym)}`;
   const box=$("my-hist");if(box)box.innerHTML=myHistHtml;
@@ -889,7 +951,8 @@ function renderOwner(){
       <div class="chips">
         ${[["all","הכל"],["free","פנויים"],["busy","בנסיעה"],["off","עסוקים"]].map(([k,l])=>
           `<button class="${owFilter===k?"on":""}" onclick="owFilter='${k}';renderOwner()">${l}</button>`).join("")}
-        <button onclick="openAdd()">➕ הוסף נהג</button></div>
+        <button onclick="openAdd()">➕ הוסף נהג</button>
+        <button onclick="openReport()">📊 דוח חודשי</button></div>
       <div class="mut" style="font-size:11.5px;margin-bottom:9px">${items.length} מתוך ${D.drivers.length}</div>
       ${items.map(d=>`<div class="drow" onclick="openDriverCard('${d.id}')">
         <div class="av">${d.name.split(" ").map(w=>w[0]).join("")}</div>
