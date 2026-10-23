@@ -168,6 +168,10 @@ table{width:100%;border-collapse:collapse;font-size:12px}
 th{text-align:right;color:var(--muted);font-size:10.5px;font-weight:600;padding:7px 6px;border-bottom:1px solid var(--line)}
 td{padding:7px 6px;border-bottom:1px solid var(--line)}
 .sumrow td{background:var(--panel-2);font-weight:700}
+.paybrk{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 11px}
+.paybrk span{background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:11.5px}
+.paybrk b{color:var(--muted);font-weight:600;margin-inline-end:4px}
+tr.go{cursor:pointer}tr.go:hover td{background:var(--panel-2)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:12px}
 .tabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);
  padding:10px 4px;font-size:12.5px;font-family:inherit;cursor:pointer}
@@ -317,6 +321,41 @@ const ils=n=>"₪"+Number(n||0).toLocaleString("he-IL");
 const ymd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const hm=d=>String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
 const dt=s=>new Date(s);
+const ymOf=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+const ymLabel=ym=>{const[y,m]=ym.split("-");return new Date(y,m-1).toLocaleDateString("he-IL",{month:"long",year:"numeric"})};
+const ymShift=(ym,n)=>{const[y,m]=ym.split("-").map(Number);return ymOf(new Date(y,m-1+n,1))};
+// השרת מחזיר עד 1000 שורות בבקשה — מושכים במנות עד שמגיע הכל
+async function fetchAll(build){let out=[],from=0;
+  for(;;){const{data,error}=await build().range(from,from+999);if(error)throw error;
+    out=out.concat(data||[]);if(!data||data.length<1000)return out;from+=1000}}
+// כל הנסיעות שהסתיימו בחודש מסוים — לנהג אחד או לכל הצי
+function monthTrips(ym,driverId){const[y,m]=ym.split("-").map(Number);
+  const a=new Date(y,m-1,1).toISOString(),b=new Date(y,m,1).toISOString();
+  return fetchAll(()=>{let q=db.from("trips").select("*").eq("status","done").gte("done_at",a).lt("done_at",b)
+    .order("done_at",{ascending:false});if(driverId)q=q.eq("driver_id",driverId);return q})}
+const fleetId=()=>me.role==="owner"?me.fleet.id:me.driver.fleet_id;
+async function tripStats(driverId){const{data}=await db.rpc("trip_stats",{p_fleet:fleetId(),p_driver:driverId||null});
+  return data||{count:0,sum:0,months:[]}}
+const sumOf=(rows,k)=>rows.reduce((s,t)=>s+Number(t[k]||0),0);
+function payBreak(rows,k){const m={};rows.forEach(t=>{const p=t.pay_method||"לא צוין";m[p]=(m[p]||0)+Number(t[k]||0)});
+  const ks=Object.keys(m).sort((a,b)=>m[b]-m[a]);
+  return ks.length?`<div class="paybrk">${ks.map(p=>`<span><b>${esc(p)}</b>${ils(m[p])}</span>`).join("")}</div>`:""}
+const monthNav=(ym,fn)=>`<div class="calnav"><button onclick="${fn}(1)">›</button>
+  <span class="m">${ymLabel(ym)}</span><button onclick="${fn}(-1)">‹</button></div>`;
+const monthsTable=(ms,fn,cur)=>ms.length?`<div class="card"><h4>כל החודשים — לחץ על חודש לפירוט</h4><table>
+  <thead><tr><th>חודש</th><th>נסיעות</th><th>סה״כ</th></tr></thead><tbody>
+  ${ms.map(m=>`<tr class="go" onclick="${fn}('${m.ym}')"${m.ym===cur?' style="outline:1px solid var(--accent)"':""}>
+    <td>${ymLabel(m.ym)}</td><td>${m.n}</td><td class="money">${ils(m.s)}</td></tr>`).join("")}</tbody></table></div>`:"";
+// טבלת נסיעות עם אופן התשלום, וסכום מוסכם אם שונה ממה שנגבה
+const tripTable=(rows,empty)=>rows.length?`<table><thead><tr><th>תאריך</th><th>מסלול</th><th>תשלום</th><th>גבייה</th></tr></thead><tbody>
+  ${rows.map(t=>`<tr><td>${dt(t.done_at).toLocaleDateString("he-IL",{day:"numeric",month:"numeric"})}<br>
+    <span class="mut" style="font-size:10px">${hm(dt(t.done_at))}</span></td>
+    <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span></td>
+    <td style="font-size:11px">${esc(t.pay_method||"—")}</td>
+    <td class="money">${ils(t.collected_amount)}${t.agreed_amount!=null&&Number(t.agreed_amount)!==Number(t.collected_amount)
+      ?`<br><span class="mut" style="font-size:10px;font-weight:400">סוכם ${ils(t.agreed_amount)}</span>`:""}</td></tr>`).join("")}</tbody>
+  <tfoot><tr class="sumrow"><td colspan="3">סה״כ ${rows.length}</td><td class="money">${ils(sumOf(rows,"collected_amount"))}</td></tr></tfoot></table>`
+  :`<div class="empty">${empty}</div>`;
 const LBL={free:"פנוי",busy:"בנסיעה",off:"עסוק"};
 const PAY=["מזומן","אשראי","הקפה / חשבונית","פתק"];
 const VTYPES=["מונית","רכב פרטי","מסחרי סגור","טנדר","מיניבוס 14 מקומות","משאית 12 טון"];
@@ -425,14 +464,16 @@ async function loadAll(){
   if(!me)return;
   const q=[
     db.from("drivers").select("*").order("name"),
-    db.from("trips").select("*").order("created_at",{ascending:false}).limit(300),
+    fetchAll(()=>db.from("trips").select("*")
+      .or(`status.in.(offered,active,released),created_at.gte.${new Date(Date.now()-3*864e5).toISOString()}`)
+      .order("created_at",{ascending:false})).then(data=>({data})),
     db.from("offers").select("*").eq("status","pending"),
     db.from("releases").select("*").order("created_at",{ascending:false}).limit(50),
     db.from("messages").select("*").order("sent_at",{ascending:false}).limit(120),
   ];
   if(me.role==="owner"){
     q.push(db.from("journal_entries").select("*"));
-    q.push(db.from("personal_trips").select("*"));
+    q.push(fetchAll(()=>db.from("personal_trips").select("*").order("entry_date",{ascending:false})).then(data=>({data})));
     q.push(db.from("offer_declines").select("*"));
     q.push(db.from("offers").select("*").eq("target","bid").in("status",["declined","expired"])
       .gte("created_at",new Date(Date.now()-36e5*24).toISOString()));
@@ -442,6 +483,7 @@ async function loadAll(){
   D.releases=r[3].data||[];D.messages=r[4].data||[];
   if(me.role==="owner"){D.journal=r[5].data||[];D.personal=r[6].data||[];D.declines=r[7].data||[];D.closedBids=r[8].data||[]}
   if(me.role==="driver"&&D.drivers.length)me.driver=D.drivers[0];
+  if(me.role==="owner")D.fleetStats=await tripStats().catch(()=>D.fleetStats);
 }
 
 let reloadT;
@@ -488,6 +530,42 @@ async function initPush(){
   else toast("בלי אישור התראות לא תדע כשמגיעה נסיעה — אפשר לאשר בהגדרות הטלפון","#f59e0b","#3a2500");
 }
 function render(){me&&(me.role==="owner"?renderOwner():renderDriver())}
+
+/* ==================== היסטוריה לפי חודשים ==================== */
+let myYm=ymOf(new Date()),myHistHtml="";
+async function loadMyHist(){
+  const ym=myYm,id=me.driver.id;
+  const[rows,s]=await Promise.all([monthTrips(ym,id),tripStats(id)]);
+  if(ym!==myYm)return;const sum=sumOf(rows,"collected_amount");
+  myHistHtml=monthNav(ym,"myShift")+`<div class="stats2">
+    <div class="stat" style="--c:#3b82f6"><div class="n">${rows.length}</div><div class="l">נסיעות בחודש</div></div>
+    <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(sum)}</div><div class="l">גבייה בחודש</div></div>
+    <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${rows.length?ils(Math.round(sum/rows.length)):"₪0"}</div><div class="l">ממוצע לנסיעה</div></div>
+    <div class="stat" style="--c:#8b5cf6"><div class="n">${s.count}</div><div class="l">סה״כ נסיעות</div></div></div>
+    ${payBreak(rows,"collected_amount")}
+    <div class="card"><h4>הנסיעות ב${ymLabel(ym)}</h4>${tripTable(rows,"אין נסיעות בחודש הזה")}</div>
+    ${monthsTable(s.months,"myGo",ym)}`;
+  const box=$("my-hist");if(box)box.innerHTML=myHistHtml;
+}
+function myShift(n){myYm=ymShift(myYm,n);myHistHtml="";loadMyHist();const b=$("my-hist");if(b)b.innerHTML='<div class="empty">טוען…</div>'}
+function myGo(ym){myYm=ym;myShift(0)}
+
+let dcYm=ymOf(new Date()),dcId=null;
+async function loadDcHist(){
+  const ym=dcYm,id=dcId;
+  const[rows,s]=await Promise.all([monthTrips(ym,id),tripStats(id)]);
+  const box=$("dc-hist");if(!box||ym!==dcYm||id!==dcId)return;const sum=sumOf(rows,"collected_amount");
+  box.innerHTML=monthNav(ym,"dcShift")+`<div class="stats2">
+    <div class="stat" style="--c:#3b82f6"><div class="n">${rows.length}</div><div class="l">נסיעות בחודש</div></div>
+    <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(sum)}</div><div class="l">גבייה בחודש</div></div></div>
+    ${payBreak(rows,"collected_amount")}${tripTable(rows,"אין נסיעות בחודש הזה")}
+    <div style="height:11px"></div>${monthsTable(s.months,"dcGo",ym)}
+    <div class="mut center" style="font-size:11px">מתחילת העבודה: ${s.count} נסיעות · ${ils(s.sum)}</div>`;
+}
+function dcShift(n){dcYm=ymShift(dcYm,n);const b=$("dc-hist");if(b)b.innerHTML='<div class="empty">טוען…</div>';loadDcHist()}
+function dcGo(ym){dcYm=ym;dcShift(0)}
+async function fillDcTotals(id){const s=await tripStats(id);
+  const a=$("dc-cnt"),b=$("dc-sum");if(a)a.textContent=s.count;if(b)b.textContent=ils(s.sum)}
 
 /* ==================== GPS אמיתי ==================== */
 
@@ -601,24 +679,7 @@ function renderDriver(){
   }
 
   if(dvPane==="trips"){
-    const done=D.trips.filter(t=>t.status==="done"&&t.driver_id===d.id);
-    const now=new Date(),mo=done.filter(t=>{const x=dt(t.done_at);
-      return x.getMonth()===now.getMonth()&&x.getFullYear()===now.getFullYear()});
-    const sum=a=>a.reduce((s,t)=>s+Number(t.collected_amount||0),0);
-    b.innerHTML=`<div class="stats2">
-      <div class="stat" style="--c:#3b82f6"><div class="n">${mo.length}</div><div class="l">נסיעות החודש</div></div>
-      <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(sum(mo))}</div><div class="l">גבייה החודש</div></div>
-      <div class="stat" style="--c:#eab308"><div class="n" style="font-size:17px">${mo.length?ils(Math.round(sum(mo)/mo.length)):"₪0"}</div><div class="l">ממוצע לנסיעה</div></div>
-      <div class="stat" style="--c:#8b5cf6"><div class="n">${done.length}</div><div class="l">סה״כ נסיעות</div></div></div>
-      <div class="card"><h4>כל הנסיעות שלי</h4>
-      ${done.length?`<table><thead><tr><th>תאריך</th><th>מסלול</th><th>גבייה</th></tr></thead><tbody>
-      ${done.map(t=>`<tr><td>${dt(t.done_at).toLocaleDateString("he-IL")}<br>
-        <span class="mut" style="font-size:10px">${hm(dt(t.done_at))}</span></td>
-        <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span></td>
-        <td class="money">${ils(t.collected_amount)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr class="sumrow"><td colspan="2">סה״כ ${done.length}</td>
-        <td class="money">${ils(sum(done))}</td></tr></tfoot></table>`
-      :`<div class="empty">עדיין לא ביצעת נסיעות</div>`}</div>`;
+    b.innerHTML=`<div id="my-hist">${myHistHtml||'<div class="empty">טוען…</div>'}</div>`;loadMyHist();
   }
 
   if(dvPane==="msgs"){
@@ -744,8 +805,7 @@ function renderOwner(){
   const b=$("ow-body");
   const st=s=>D.drivers.filter(d=>d.status===s).length;
   const now=new Date();
-  const money=D.trips.filter(t=>t.status==="done"&&t.done_at&&dt(t.done_at).getMonth()===now.getMonth()
-    &&dt(t.done_at).getFullYear()===now.getFullYear()).reduce((s,t)=>s+Number(t.collected_amount||0),0);
+  const money=((D.fleetStats&&D.fleetStats.months)||[]).find(m=>m.ym===ymOf(now))?.s||0;
   $("ow-sub").textContent=`${D.drivers.length} נהגים · ${st("free")} פנויים`;
   setBadge("ow-b-map",openRel().length+pool().length);
   setBadge("ow-b-today",todayTrips().filter(t=>t.status==="active").length);
@@ -879,8 +939,7 @@ async function dropTrip(id){
 /* ----- כרטיס נהג ----- */
 function openDriverCard(id,tab="info"){
   const d=D.drivers.find(x=>x.id===id);if(!d)return;
-  const done=D.trips.filter(t=>t.status==="done"&&t.driver_id===id);
-  const sum=a=>a.reduce((s,t)=>s+Number(t.collected_amount||0),0);
+  if(dcId!==id){dcId=id;dcYm=ymOf(new Date())}
   let body=`<div class="tabs">${[["info","פרטים"],["hist","היסטוריה"]].map(([k,l])=>
     `<button class="${tab===k?"on":""}" onclick="openDriverCard('${id}','${k}')">${l}</button>`).join("")}</div>`;
   if(tab==="info")body+=`<table><tbody>
@@ -891,23 +950,19 @@ function openDriverCard(id,tab="info"){
     <tr><td class="mut">בסיס</td><td>${esc(d.base_area||"—")}</td></tr>
     <tr><td class="mut">סטטוס</td><td>${LBL[d.status]}</td></tr>
     <tr><td class="mut">נראה לאחרונה</td><td>${d.last_seen?dt(d.last_seen).toLocaleString("he-IL"):"—"}</td></tr>
-    <tr><td class="mut">סה״כ נסיעות</td><td>${done.length}</td></tr>
-    <tr><td class="mut">סה״כ גבייה</td><td class="money">${ils(sum(done))}</td></tr>
+    <tr><td class="mut">סה״כ נסיעות</td><td id="dc-cnt">…</td></tr>
+    <tr><td class="mut">סה״כ גבייה</td><td class="money" id="dc-sum">…</td></tr>
     ${d.join_pin?`<tr><td class="mut">קוד חיבור</td><td style="color:var(--gold);font-weight:700">${d.join_pin}</td></tr>`:""}
     </tbody></table>
     ${d.join_pin?`<div class="priv" style="margin-top:12px">הנהג עדיין לא חיבר את החשבון שלו.
       מסור לו את הקוד <b style="color:var(--gold)">${d.join_pin}</b> — הוא נרשם באימייל וסיסמה, מזין אותו פעם אחת, וזהו.</div>`
       :`<button class="btn s sm" style="margin-top:12px" onclick="doResetPin('${id}')">🔑 צור קוד חיבור חדש</button>`}`;
-  if(tab==="hist")body+=done.length?`<table><thead><tr><th>תאריך</th><th>מסלול</th><th>גבייה</th></tr></thead><tbody>
-    ${done.map(t=>`<tr><td>${dt(t.done_at).toLocaleDateString("he-IL")}</td>
-      <td style="font-size:11px">${esc(t.from_text)}<br><span class="mut">← ${esc(t.to_text)}</span></td>
-      <td class="money">${ils(t.collected_amount)}</td></tr>`).join("")}</tbody>
-    <tfoot><tr class="sumrow"><td colspan="2">סה״כ ${done.length}</td>
-      <td class="money">${ils(sum(done))}</td></tr></tfoot></table>`:`<div class="empty">אין עדיין נסיעות</div>`;
+  if(tab==="hist")body+=`<div id="dc-hist"><div class="empty">טוען…</div></div>`;
   sheet(`${esc(d.name)} <span class="code">${d.code}</span>`,body,
     `<button class="btn d sm" onclick="doRemove('${id}')">🗑</button>
      <button class="btn s sm" onclick="openPM('${id}')">✉ הודעה</button>
      ${d.status==="free"?`<button class="btn p sm" onclick="openTrip('${id}')">שלח נסיעה</button>`:""}`);
+  if(tab==="hist")loadDcHist();else fillDcTotals(id);
 }
 async function doResetPin(id){
   try{const pin=await rpc("reset_join_pin",{p_driver:id});
@@ -1174,23 +1229,29 @@ async function calCancel(id){
   await db.from("journal_entries").update({status:"planned",offer_id:null}).eq("id",id);
   toast("ההעברה בוטלה","#8b5cf6","#fff");await loadAll();render();
 }
+let phYm=ymOf(new Date());
+function phShift(n){phYm=ymShift(phYm,n);renderCal()}
+function phGo(ym){phYm=ym;renderCal()}
 function histHtml(){
   if(!D.personal.length)return`<div class="empty">עדיין לא סימנת נסיעה כ"בוצעה".</div>`;
-  const s=[...D.personal].sort((a,b)=>(b.entry_date+b.entry_time).localeCompare(a.entry_date+a.entry_time));
-  const tot=s.reduce((a,t)=>a+Number(t.amount),0),m={};
-  s.forEach(t=>{const k=t.entry_date.slice(0,7);m[k]=m[k]||{n:0,s:0};m[k].n++;m[k].s+=Number(t.amount)});
-  return`<div class="stats2">
-      <div class="stat" style="--c:#8b5cf6"><div class="n">${s.length}</div><div class="l">נסיעות שביצעתי</div></div>
-      <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(tot)}</div><div class="l">סה״כ גבייה</div></div></div>
-    <div class="card"><h4>סיכום חודשי</h4><table><thead><tr><th>חודש</th><th>נסיעות</th><th>סה״כ</th></tr></thead><tbody>
-      ${Object.keys(m).sort().reverse().map(k=>{const[y,mo]=k.split("-");
-        return`<tr><td>${new Date(y,mo-1).toLocaleDateString("he-IL",{month:"long",year:"numeric"})}</td>
-        <td>${m[k].n}</td><td class="money">${ils(m[k].s)}</td></tr>`}).join("")}</tbody></table></div>
-    <div class="card"><h4>כל הנסיעות</h4><table><thead><tr><th>תאריך</th><th>הנסיעה</th><th>גבייה</th></tr></thead><tbody>
-      ${s.map(t=>`<tr><td>${t.entry_date}<br><span class="mut" style="font-size:10px">${t.entry_time.slice(0,5)}</span></td>
+  const all=[...D.personal].sort((a,b)=>(b.entry_date+b.entry_time).localeCompare(a.entry_date+a.entry_time));
+  const m={};all.forEach(t=>{const k=t.entry_date.slice(0,7);m[k]=m[k]||{ym:k,n:0,s:0};m[k].n++;m[k].s+=Number(t.amount)});
+  const months=Object.values(m).sort((a,b)=>b.ym.localeCompare(a.ym));
+  const rows=all.filter(t=>t.entry_date.slice(0,7)===phYm),sum=sumOf(rows,"amount");
+  return monthNav(phYm,"phShift")+`<div class="stats2">
+      <div class="stat" style="--c:#8b5cf6"><div class="n">${rows.length}</div><div class="l">נסיעות בחודש</div></div>
+      <div class="stat" style="--c:#22c55e"><div class="n" style="font-size:17px">${ils(sum)}</div><div class="l">גבייה בחודש</div></div></div>
+    ${payBreak(rows,"amount")}
+    <div class="card"><h4>הנסיעות שלי ב${ymLabel(phYm)}</h4>${rows.length?`<table>
+      <thead><tr><th>תאריך</th><th>הנסיעה</th><th>תשלום</th><th>גבייה</th></tr></thead><tbody>
+      ${rows.map(t=>`<tr><td>${t.entry_date.slice(8)}/${t.entry_date.slice(5,7)}<br><span class="mut" style="font-size:10px">${t.entry_time.slice(0,5)}</span></td>
         <td style="font-size:11.5px">${esc(t.title)}${t.summary?`<br><span class="mut">${esc(t.summary)}</span>`:""}</td>
+        <td style="font-size:11px">${esc(t.pay_method||"—")}</td>
         <td class="money">${ils(t.amount)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr class="sumrow"><td colspan="2">סה״כ ${s.length}</td><td class="money">${ils(tot)}</td></tr></tfoot></table></div>`;
+      <tfoot><tr class="sumrow"><td colspan="3">סה״כ ${rows.length}</td><td class="money">${ils(sum)}</td></tr></tfoot></table>`
+      :`<div class="empty">אין נסיעות בחודש הזה</div>`}</div>
+    ${monthsTable(months,"phGo",phYm)}
+    <div class="mut center" style="font-size:11px">מתחילת העבודה: ${all.length} נסיעות · ${ils(sumOf(all,"amount"))}</div>`;
 }
 
 /* ==================== הפעלה ==================== */
