@@ -13,7 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="גלגלים">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<!-- עותק מקומי (2.118.0) — לא תלוי בשרת חיצוני ולא מתעדכן לבד לגרסה שעלולה לשבור -->
+<script src="vendor/supabase.js"></script>
 <script src="capacitor.js"></script>
 <style>
 :root{--bg:#0f1419;--panel:#161c24;--panel-2:#1d252f;--line:#2a3441;--txt:#e8edf3;--muted:#8b98a8;
@@ -154,6 +155,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
  border-radius:8px;padding:7px 4px;font-size:11.5px;font-family:inherit;cursor:pointer}
 .ent .ea button.ok{border-color:rgba(34,197,94,.45);color:var(--free)}
 .ent .ea button.mv{border-color:rgba(234,179,8,.45);color:var(--gold)}
+.ent .ea button.no{border-color:rgba(239,68,68,.45);color:var(--red)}
 .priv{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.28);border-radius:10px;
  padding:10px 12px;font-size:11.5px;color:var(--muted);line-height:1.65;margin-bottom:11px}
 .calnav{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
@@ -198,6 +200,9 @@ tr.go{cursor:pointer}tr.go:hover td{background:var(--panel-2)}
  transition:transform .3s;line-height:1.5}
 #toast.on{transform:translateY(0)}
 #splash{position:absolute;inset:0;background:var(--bg);display:grid;place-items:center;z-index:200}
+#sp-err{display:none;margin-top:14px;max-width:290px;font-size:12.5px;color:var(--muted);line-height:1.6}
+#sp-err.on{display:block}
+#sp-err .why{direction:ltr;font-size:10.5px;opacity:.7;word-break:break-word;margin:6px 0 12px}
 .pinbox{background:var(--panel-2);border:2px dashed var(--gold);border-radius:12px;padding:14px;text-align:center;margin-top:12px}
 .pinbox .p{font-size:30px;font-weight:800;letter-spacing:5px;color:var(--gold);font-variant-numeric:tabular-nums}
 </style>
@@ -302,7 +307,10 @@ tr.go{cursor:pointer}tr.go:hover td{background:var(--panel-2)}
   </div>
 
   <div id="toast"></div>
-  <div id="splash"><div class="center"><div class="logo">🚚</div><div class="mut">מתחבר לשרת…</div></div></div>
+  <div id="splash"><div class="center"><div class="logo">🚚</div><div class="mut" id="sp-txt">מתחבר לשרת…</div>
+    <div id="sp-err"><div id="sp-msg"></div><div class="why" id="sp-why"></div>
+      <button class="btn g" onclick="boot()">🔄 נסה שוב</button>
+      <button class="btn s sm" style="margin-top:8px" onclick="signOut()">התנתק והתחבר מחדש</button></div></div></div>
 </div>
 <button id="fs-exit" onclick="toggleFs()">✕ סגור מפה מלאה</button>
 
@@ -434,8 +442,10 @@ async function doAuth(){
 }
 async function signOut(){
   if(bgWatcher){await BG.removeWatcher({id:bgWatcher}).catch(()=>{});bgWatcher=null}
-  if(pushToken)await db.from("push_tokens").delete().eq("token",pushToken);
-  await db.auth.signOut();me=null;location.reload()}
+  if(pushToken)await withTimeout(db.from("push_tokens").delete().eq("token",pushToken),5000).catch(()=>{});
+  await withTimeout(db.auth.signOut(),5000).catch(()=>{});
+  try{Object.keys(localStorage).filter(k=>k.startsWith("sb-")).forEach(k=>localStorage.removeItem(k))}catch(e){}
+  me=null;location.reload()}
 
 async function doClaim(){
   const pin=val("cl-pin").trim();
@@ -451,7 +461,21 @@ async function doCreateFleet(){
 }
 
 /* ==================== אתחול ==================== */
+// אם משהו נתקע או נכשל — לא משאירים "מתחבר לשרת" לנצח: מציגים מה קרה וכפתור לנסות שוב
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout")),ms))]);
+let booting=false;
 async function boot(){
+  if(booting)return;booting=true;
+  $("sp-err").classList.remove("on");$("sp-txt").style.display="block";
+  try{await withTimeout(bootInner(),25000)}
+  catch(e){console.error("boot",e);
+    const net=!navigator.onLine||/timeout|fetch|network/i.test(String(e&&e.message));
+    $("sp-msg").textContent=net?"אין חיבור לשרת כרגע. בדוק שיש אינטרנט ונסה שוב.":"משהו השתבש בטעינה. נסה שוב — ואם זה חוזר, צלם את המסך הזה ושלח לאופק.";
+    $("sp-why").textContent=String((e&&e.message)||e).slice(0,200);
+    $("sp-txt").style.display="none";$("splash").style.display="grid";$("sp-err").classList.add("on")}
+  finally{booting=false}
+}
+async function bootInner(){
   $("splash").style.display="grid";
   const{data:{user}}=await db.auth.getUser();
   if(!user){$("splash").style.display="none";showScreen("auth");return}
@@ -501,8 +525,9 @@ async function loadAll(){
   if(me.role==="owner"){D.fleetStats=await tripStats().catch(()=>D.fleetStats);loadPlaces()}
 }
 
-let reloadT;
+let reloadT,subbed=false;
 function subscribe(){
+  if(subbed)return setupPush();subbed=true;
   db.channel("fleet").on("postgres_changes",{event:"*",schema:"public"},()=>{
     clearTimeout(reloadT);reloadT=setTimeout(async()=>{await loadAll();render()},350);
   }).subscribe();
@@ -930,7 +955,8 @@ function renderOwner(){
           <div class="nt">${o.target==="bid"?"📣 מכרז לכל הפנויים":"🎯 "+esc(drvName(o.target))} · ${ils(t.agreed_amount)}
             <br>⏳ ${timeLeft(o)}${D.declines.filter(x=>x.offer_id===o.id).length
               ?` · ${D.declines.filter(x=>x.offer_id===o.id).length} סימנו "לא יכול"`:""}</div>
-          ${o.target==="bid"?`<div class="ea"><button class="mv" onclick="resendBid('${o.id}')">🔔 שלח שוב לכולם</button></div>`:""}
+          <div class="ea">${o.target==="bid"?`<button class="mv" onclick="resendBid('${o.id}')">🔔 שלח שוב לכולם</button>`:""}
+            <button class="no" onclick="cancelOffer('${o.id}')">✖ ${o.target==="bid"?"בטל מכרז":"בטל הצעה"}</button></div>
           </div>`:""}).join("")}</div>`:""}
       ${(D.closedBids||[]).filter(o=>{const t=tripOf(o);return t&&t.status==="cancelled"}).length?`<div class="card" style="border-color:var(--busy)">
         <h4>📣 מכרזים שאף אחד לא לקח</h4>
@@ -1188,6 +1214,18 @@ async function doBroadcast(){
 async function resendBid(id){
   try{await rpc("resend_bid",{p_offer:id});
     toast("המכרז נשלח שוב לכל הנהגים 🔔","#eab308","#241f00");await loadAll();render()}catch(e){}
+}
+// ביטול מכרז/הצעה שעוד לא נלקחו — נעלם מיד אצל כל הנהגים
+async function cancelOffer(id){
+  const o=D.offers.find(x=>x.id===id);if(!o)return;
+  if(!confirm(o.target==="bid"?"לבטל את המכרז?\nהוא ייעלם אצל כל הנהגים.":"לבטל את ההצעה לנהג?"))return;
+  // רק אם עדיין ממתין — אם נהג כבר לקח, לא נוגעים
+  const{data,error}=await db.from("offers").update({status:"cancelled"}).eq("id",id).eq("status","pending").select("id");
+  if(error)return err(error.message);
+  if(!data||!data.length){toast("נהג כבר לקח את הנסיעה — לא בוטל","#f59e0b","#3a2500");await loadAll();render();return}
+  await db.from("trips").update({status:"cancelled"}).eq("id",o.trip_id).eq("status","offered");
+  await db.from("journal_entries").update({status:"planned",offer_id:null}).eq("offer_id",id);
+  toast(o.target==="bid"?"המכרז בוטל":"ההצעה בוטלה","#ef4444","#fff");await loadAll();render();
 }
 function openReassign(id){
   const t=D.trips.find(x=>x.id===id),free=D.drivers.filter(d=>d.status==="free");
