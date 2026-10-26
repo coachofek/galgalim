@@ -520,7 +520,7 @@ async function loadAll(){
       .gte("created_at",new Date(Date.now()-36e5*24).toISOString()));
   }
   const r=await Promise.all(q);
-  D.allDrivers=r[0].data||[];D.drivers=D.allDrivers.filter(d=>d.active!==false);
+  D.allDrivers=r[0].data||[];D.drivers=D.allDrivers.filter(d=>d.active!==false&&!d.deleted_at);
   D.trips=r[1].data||[];D.offers=r[2].data||[];
   D.releases=r[3].data||[];D.messages=r[4].data||[];
   if(me.role==="owner"){D.journal=r[5].data||[];D.personal=r[6].data||[];D.declines=r[7].data||[];D.closedBids=r[8].data||[]}
@@ -991,8 +991,8 @@ function renderOwner(){
             :isStale(d)?`<span class="stale-n">⚠ ${agoTxt(d)}</span>`:d.lat?"📍 מיקום מעודכן":"⚪ אין מיקום"}</div></div>
         <span class="badge ${d.status}">${LBL[d.status]}</span></div>`).join("")
         ||`<div class="empty">אין עדיין נהגים.<br>לחץ "➕ הוסף נהג" כדי להתחיל.</div>`}
-      ${D.allDrivers.some(d=>d.active===false)?`<div class="card" style="margin-top:14px"><h4>🚫 נהגים מושבתים — ההיסטוריה שלהם נשמרת</h4>
-        ${D.allDrivers.filter(d=>d.active===false).map(d=>`<div class="drow" style="opacity:.6" onclick="openDriverCard('${d.id}')">
+      ${D.allDrivers.some(d=>d.active===false&&!d.deleted_at)?`<div class="card" style="margin-top:14px"><h4>🚫 נהגים מושבתים — ההיסטוריה שלהם נשמרת</h4>
+        ${D.allDrivers.filter(d=>d.active===false&&!d.deleted_at).map(d=>`<div class="drow" style="opacity:.6" onclick="openDriverCard('${d.id}')">
           <div class="av">${d.name.split(" ").map(w=>w[0]).join("")}</div>
           <div class="i"><div class="n1">${esc(d.name)}<span class="code">${d.code}</span></div>
             <div class="n2">🚗 ${esc(d.vehicle_type||"—")} · ${esc(d.plate||"—")}</div></div>
@@ -1096,12 +1096,33 @@ function openDriverCard(id,tab="info"){
       :`<button class="btn s sm" style="margin-top:12px" onclick="doResetPin('${id}')">🔑 צור קוד חיבור חדש</button>`}`;
   if(tab==="hist")body+=`<div id="dc-hist"><div class="empty">טוען…</div></div>`;
   sheet(`${esc(d.name)} <span class="code">${d.code}</span>`,body,
-    off?`<button class="btn ok" onclick="setActive('${id}',true)">♻ החזר לפעילות</button>`
+    off?`<button class="btn ok" onclick="setActive('${id}',true)">♻ החזר לפעילות</button>
+     <button class="btn d sm" onclick="askDelDriver('${id}')">🗑 מחק</button>`
     :`<button class="btn d sm" onclick="setActive('${id}',false)">🚫 השבת</button>
+     <button class="btn d sm" onclick="askDelDriver('${id}')">🗑 מחק</button>
      <button class="btn s sm" onclick="openPM('${id}')">✉ הודעה</button>
      ${d.status==="free"?`<button class="btn p sm" onclick="openTrip('${id}')">שלח נסיעה</button>`:""}`);
   if(tab==="hist")loadDcHist();else fillDcTotals(id);
 }
+/* ----- מחיקת נהג: עם ההיסטוריה או בלעדיה ----- */
+function askDelDriver(id){const d=D.allDrivers.find(x=>x.id===id);if(!d)return;
+  sheet(`🗑 מחיקת ${esc(d.name)} <span class="code">${d.code}</span>`,
+    `<div class="priv">בחר מה לעשות עם הנסיעות שהנהג עשה עד היום:</div>
+     <button class="btn s" style="margin-bottom:10px;text-align:right;line-height:1.5" onclick="doDelDriver('${id}',false)">
+       <b>📁 מחק נהג והשאר היסטוריה</b><br><span class="mut" style="font-size:12px;font-weight:400">
+       הנהג נעלם מהרשימות והחשבון שלו מנותק. הנסיעות שלו נשארות עם השם שלו, ונספרות בדוחות ובהתחשבנות.</span></button>
+     <button class="btn d" style="text-align:right;line-height:1.5" onclick="doDelDriver('${id}',true)">
+       <b>🗑 מחק נהג והיסטוריה</b><br><span style="font-size:12px;font-weight:400;opacity:.85">
+       מוחק לצמיתות את הנהג ואת כל הנסיעות וההודעות שלו. אי אפשר לשחזר.</span></button>`,
+    `<button class="btn s sm" onclick="openDriverCard('${id}')">ביטול</button>`)}
+async function doDelDriver(id,withHist){const d=D.allDrivers.find(x=>x.id===id);if(!d)return;
+  if(!confirm(withHist?`למחוק לצמיתות את ${d.name} ואת כל הנסיעות שלו?
+אי אפשר לשחזר.`
+    :`למחוק את ${d.name}?
+הנסיעות שלו יישארו בהיסטוריה.`))return;
+  try{await rpc("delete_driver",{p_driver:id,p_with_history:withHist});
+    closeSheet();toast(withHist?"הנהג וההיסטוריה שלו נמחקו":"הנהג נמחק · ההיסטוריה נשמרה","#ef4444","#fff");
+    await loadAll();render()}catch(e){}}
 async function doResetPin(id){
   try{const pin=await rpc("reset_join_pin",{p_driver:id});
     sheet("🔑 קוד חיבור חדש",`<div class="priv">מסור לנהג את הקוד הזה. הוא נרשם באימייל וסיסמה ומזין אותו פעם אחת.</div>
