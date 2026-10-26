@@ -12,8 +12,11 @@ begin
   select * into v_d from drivers where id = p_driver for update;
   if not found then raise exception 'הנהג לא קיים'; end if;
   if not is_fleet_owner(v_d.fleet_id) then raise exception 'לא מורשה'; end if;
-  if exists (select 1 from trips where driver_id = p_driver and status = 'active' and deleted_at is null)
-    then raise exception 'לנהג יש נסיעה פעילה — אפשר למחוק רק אחרי שיסיים'; end if;
+  -- נסיעה פעילה לא הולכת לאיבוד: חוזרת למנהל לשיבוץ מחדש (כמו שחרור מאושר) — בשתי האפשרויות
+  update releases set status = 'approved', decided_at = now()
+   where driver_id = p_driver and status in ('pending','seen');
+  update trips set status = 'released', driver_id = null
+   where driver_id = p_driver and status = 'active' and deleted_at is null;
 
   -- הצעות שממתינות לו — מבטלים
   update trips set status = 'cancelled'

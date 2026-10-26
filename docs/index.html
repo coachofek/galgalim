@@ -1107,7 +1107,8 @@ function openDriverCard(id,tab="info"){
 /* ----- מחיקת נהג: עם ההיסטוריה או בלעדיה ----- */
 function askDelDriver(id){const d=D.allDrivers.find(x=>x.id===id);if(!d)return;
   sheet(`🗑 מחיקת ${esc(d.name)} <span class="code">${d.code}</span>`,
-    `<div class="priv">בחר מה לעשות עם הנסיעות שהנהג עשה עד היום:</div>
+    `${d.status==="busy"?`<div class="priv" style="border-color:var(--busy)">🚕 הנהג באמצע נסיעה — הנסיעה תחזור אליך לשיבוץ מחדש לנהג אחר.</div>`:""}
+     <div class="priv">בחר מה לעשות עם הנסיעות שהנהג עשה עד היום:</div>
      <button class="btn s" style="margin-bottom:10px;text-align:right;line-height:1.5" onclick="doDelDriver('${id}',false)">
        <b>📁 מחק נהג והשאר היסטוריה</b><br><span class="mut" style="font-size:12px;font-weight:400">
        הנהג נעלם מהרשימות והחשבון שלו מנותק. הנסיעות שלו נשארות עם השם שלו, ונספרות בדוחות ובהתחשבנות.</span></button>
