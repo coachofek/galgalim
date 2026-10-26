@@ -241,7 +241,7 @@ tr.go{cursor:pointer}tr.go:hover td{background:var(--panel-2)}
       <div class="sub" style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:20px">
         הזן את קוד החיבור בן 6 הספרות שקיבלת מהמנהל</div>
       <div class="err" id="cl-err"></div>
-      <div class="fld"><input id="cl-pin" inputmode="numeric" maxlength="6" placeholder="000000"
+      <div class="fld"><input id="cl-pin" inputmode="numeric" autocomplete="one-time-code" placeholder="000000"
         style="text-align:center;font-size:26px;letter-spacing:8px;font-weight:700"></div>
       <button class="btn p" onclick="doClaim()">חבר אותי</button>
       <button class="btn s" onclick="signOut()">התנתק</button>
@@ -258,6 +258,7 @@ tr.go{cursor:pointer}tr.go:hover td{background:var(--panel-2)}
       <div class="err" id="fl-err"></div>
       <div class="fld"><label>שם הצי</label><input id="fl-name" placeholder="לדוגמה: מוניות ירושלים"></div>
       <button class="btn p" onclick="doCreateFleet()">צור צי</button>
+      <button class="btn s" onclick="showScreen('claim')">🔑 אני נהג — יש לי קוד חיבור</button>
       <button class="btn s" onclick="signOut()">התנתק</button>
     </div>
   </div>
@@ -424,14 +425,14 @@ function authMode(m){authM=m;
 function authErr(m){const e=$("au-err");e.textContent=m;e.classList.add("on")}
 
 async function doAuth(){
-  const email=val("au-email").trim(),pass=val("au-pass");
+  const email=val("au-email").replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,"").toLowerCase(),pass=val("au-pass");
   if(!email||!pass)return authErr("נא למלא אימייל וסיסמה");
   if(authM==="up"&&pass.length<6)return authErr("הסיסמה חייבת להיות באורך 6 תווים לפחות");
   $("au-go").disabled=true;
   try{
     if(authM==="in"){
       const{error}=await db.auth.signInWithPassword({email,password:pass});
-      if(error)return authErr(error.message.includes("Invalid")?"אימייל או סיסמה שגויים":error.message);
+      if(error)return authErr(error.message.includes("Invalid")?"אימייל או סיסמה שגויים. נהג חדש שעוד לא נרשם? לחץ למעלה על \"הרשמה\".":error.message);
     }else{
       const{error}=await db.auth.signUp({email,password:pass,
         options:{data:{intended_role:val("au-role")}}});
@@ -447,8 +448,10 @@ async function signOut(){
   try{Object.keys(localStorage).filter(k=>k.startsWith("sb-")).forEach(k=>localStorage.removeItem(k))}catch(e){}
   me=null;location.reload()}
 
+// מוציא רק ספרות — קוד שמועתק מוואטסאפ מגיע לפעמים עם תווים נסתרים/רווחים/ספרות ערביות
+const digitsOnly=t=>String(t||"").replace(/[\u0660-\u0669\u06F0-\u06F9]/g,c=>String(c.charCodeAt(0)&15)).replace(/\D/g,"");
 async function doClaim(){
-  const pin=val("cl-pin").trim();
+  const pin=digitsOnly(val("cl-pin"));
   if(pin.length!==6)return $("cl-err").textContent="הקוד חייב להיות 6 ספרות",$("cl-err").classList.add("on");
   try{await rpc("claim_driver",{p_pin:pin});toast("חוברת בהצלחה!");await boot()}
   catch(e){$("cl-err").textContent=e.message;$("cl-err").classList.add("on")}
@@ -1088,7 +1091,8 @@ function openDriverCard(id,tab="info"){
     ${d.join_pin?`<tr><td class="mut">קוד חיבור</td><td style="color:var(--gold);font-weight:700">${d.join_pin}</td></tr>`:""}
     </tbody></table>
     ${d.join_pin?`<div class="priv" style="margin-top:12px">הנהג עדיין לא חיבר את החשבון שלו.
-      מסור לו את הקוד <b style="color:var(--gold)">${d.join_pin}</b> — הוא נרשם באימייל וסיסמה, מזין אותו פעם אחת, וזהו.</div>`
+      מסור לו את הקוד <b style="color:var(--gold)">${d.join_pin}</b> — הוא נרשם באימייל וסיסמה, מזין אותו פעם אחת, וזהו.</div>
+      <button class="btn g sm" style="margin-top:9px" onclick="sendJoin('${id}')">📤 שלח לו את הקוד + הוראות בוואטסאפ</button>`
       :`<button class="btn s sm" style="margin-top:12px" onclick="doResetPin('${id}')">🔑 צור קוד חיבור חדש</button>`}`;
   if(tab==="hist")body+=`<div id="dc-hist"><div class="empty">טוען…</div></div>`;
   sheet(`${esc(d.name)} <span class="code">${d.code}</span>`,body,
@@ -1135,6 +1139,17 @@ async function doAdd(){
       `<button class="btn p" onclick="closeSheet()">סגור</button>`);
     await loadAll();render()}catch(e){}
 }
+function sendJoin(id){const d=D.allDrivers.find(x=>x.id===id);if(!d)return;
+  openWa(d.phone,`שלום ${d.name}, ככה מתחברים לאפליקציה של גלגלים על גלגלים:
+
+`+
+    `1. מורידים ומתקינים: https://github.com/coachofek/galgalim/releases/latest/download/galgalim.apk
+`+
+    `2. בפתיחה לוחצים על "הרשמה" (לא "התחברות"), ממלאים אימייל וסיסמה, ובוחרים "נהג".
+`+
+    `3. מזינים את קוד החיבור: ${d.join_pin}
+
+זה הכל, פעם אחת בלבד.`)}
 function openTrip(id,journalId){
   const d=D.drivers.find(x=>x.id===id);
   sheet(`שליחת נסיעה — ${esc(d.name)}`,
