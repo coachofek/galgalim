@@ -156,6 +156,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .ent .ea button.ok{border-color:rgba(34,197,94,.45);color:var(--free)}
 .ent .ea button.mv{border-color:rgba(234,179,8,.45);color:var(--gold)}
 .ent .ea button.no{border-color:rgba(239,68,68,.45);color:var(--red)}
+.dc-loc{margin-bottom:12px;padding:10px;border:1px solid rgba(255,255,255,.08);border-radius:10px}
+#dc-map{height:170px;border-radius:8px;overflow:hidden}
 .priv{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.28);border-radius:10px;
  padding:10px 12px;font-size:11.5px;color:var(--muted);line-height:1.65;margin-bottom:11px}
 .calnav{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
@@ -1078,7 +1080,7 @@ function openDriverCard(id,tab="info"){
   if(dcId!==id){dcId=id;dcYm=ymOf(new Date())}
   let body=`<div class="tabs">${[["info","פרטים"],["hist","היסטוריה"]].map(([k,l])=>
     `<button class="${tab===k?"on":""}" onclick="openDriverCard('${id}','${k}')">${l}</button>`).join("")}</div>`;
-  if(tab==="info")body+=`<table><tbody>
+  if(tab==="info")body+=dcLocHtml(d)+`<table><tbody>
     <tr><td class="mut">קוד נהג</td><td>${d.code}</td></tr>
     <tr><td class="mut">מספר רכב</td><td>${esc(d.plate||"—")}</td></tr>
     <tr><td class="mut">סוג רכב</td><td>${esc(d.vehicle_type||"—")}</td></tr>
@@ -1102,7 +1104,47 @@ function openDriverCard(id,tab="info"){
      <button class="btn d sm" onclick="askDelDriver('${id}')">🗑 מחק</button>
      <button class="btn s sm" onclick="openPM('${id}')">✉ הודעה</button>
      ${d.status==="free"?`<button class="btn p sm" onclick="openTrip('${id}')">שלח נסיעה</button>`:""}`);
-  if(tab==="hist")loadDcHist();else fillDcTotals(id);
+  if(tab==="hist")loadDcHist();else{fillDcTotals(id);initDcLoc(d)}
+}
+/* ----- מיקום הנהג בכרטיס: כתובת + מפה קטנה + ניווט ----- */
+let dcMap=null;const addrCache={};
+const agoShort=iso=>{const m=Math.round((Date.now()-dt(iso))/6e4);
+  return m<1?"עכשיו":m<60?`לפני ${m} דק׳`:m<1440?`לפני ${Math.round(m/60)} שע׳`:`לפני ${Math.round(m/1440)} ימים`};
+function dcLocHtml(d){
+  if(d.lat==null||d.lng==null)return`<div class="dc-loc"><div class="mut">📍 אין מיקום זמין — הנהג עדיין לא שידר מיקום</div></div>`;
+  const old=d.last_seen&&Date.now()-dt(d.last_seen)>36e5;
+  return`<div class="dc-loc">
+    <div id="dc-addr" style="font-weight:700">📍 טוען כתובת…</div>
+    <div class="mut" style="font-size:12px;margin:2px 0 8px;${old?"color:var(--busy)":""}">
+      ${d.last_seen?(old?"⚠ ":"")+"המיקום עודכן "+agoShort(d.last_seen):"זמן העדכון לא ידוע"}</div>
+    <div id="dc-map"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn s sm" onclick="window.open('https://waze.com/ul?ll=${d.lat},${d.lng}&navigate=yes','_blank')">🚗 נווט בוויז</button>
+      <button class="btn s sm" onclick="window.open('https://www.google.com/maps?q=${d.lat},${d.lng}','_blank')">🗺 גוגל מפות</button>
+    </div></div>`}
+async function initDcLoc(d){
+  if(dcMap){dcMap.remove();dcMap=null}
+  if(d.lat==null||d.lng==null)return;
+  const host=$("dc-map");
+  if(host&&hasL()){
+    dcMap=L.map(host,{zoomControl:false,attributionControl:false}).setView([d.lat,d.lng],16);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(dcMap);
+    L.marker([d.lat,d.lng]).addTo(dcMap);
+    setTimeout(()=>dcMap&&dcMap.invalidateSize(),300);
+  }else if(host)host.style.display="none";
+  // כתובת מתוך הנקודה (OpenStreetMap), עם זיכרון כדי לא לבקש שוב את אותה נקודה
+  const key=d.lat.toFixed(4)+","+d.lng.toFixed(4);
+  let addr=addrCache[key];
+  if(!addr){
+    try{const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=he&zoom=18&lat=${d.lat}&lon=${d.lng}`);
+      const j=await r.json(),a=j.address||{};
+      const street=a.road||a.pedestrian||a.neighbourhood||a.suburb||"";
+      const city=a.city||a.town||a.village||a.municipality||"";
+      addr=[street&&(street+(a.house_number?" "+a.house_number:"")),city].filter(Boolean).join(", ")||j.display_name||"";
+      if(addr)addrCache[key]=addr;
+    }catch(e){addr=""}
+  }
+  const el=$("dc-addr");if(el&&dcId===d.id)el.textContent="📍 "+(addr||`${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`);
 }
 /* ----- מחיקת נהג: עם ההיסטוריה או בלעדיה ----- */
 function askDelDriver(id){const d=D.allDrivers.find(x=>x.id===id);if(!d)return;
