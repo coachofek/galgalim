@@ -429,6 +429,13 @@ function authErr(m){const e=$("au-err");e.textContent=m;e.classList.add("on")}
 async function doAuth(){
   const email=val("au-email").replace(/[\s\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g,"").toLowerCase(),pass=val("au-pass");
   if(!email||!pass)return authErr("נא למלא אימייל וסיסמה");
+  if(!/^[^@]+@[^@]+\.[a-z]{2,}$/.test(email)){
+    // הטעות הנפוצה: שכחו את ה-@ (למשל name123gmail.com) — מתקנים בשדה ומבקשים לבדוק
+    const m=email.replace(/@/g,"").match(/^(.+?)(gmail\.com|walla\.(?:com|co\.il)|hotmail\.com|yahoo\.com|outlook\.com|icloud\.com|live\.com)$/);
+    if(m){const fixed=m[1]+"@"+m[2];$("au-email").value=fixed;
+      return authErr("חסר @ באימייל. תיקנתי ל: "+fixed+" — בדוק שזה נכון ולחץ שוב")}
+    return authErr("האימייל לא תקין — חסר @ או נקודה. צריך להיות בצורה name@gmail.com");
+  }
   if(authM==="up"&&pass.length<6)return authErr("הסיסמה חייבת להיות באורך 6 תווים לפחות");
   $("au-go").disabled=true;
   try{
@@ -438,7 +445,8 @@ async function doAuth(){
     }else{
       const{error}=await db.auth.signUp({email,password:pass,
         options:{data:{intended_role:val("au-role")}}});
-      if(error)return authErr(error.message.includes("already")?"האימייל הזה כבר רשום — עבור להתחברות":error.message);
+      if(error)return authErr(error.message.includes("already")?"האימייל הזה כבר רשום — עבור להתחברות"
+        :/email/i.test(error.message)?"האימייל לא תקין — בדוק שהוא כתוב נכון, למשל name@gmail.com":error.message);
     }
     await boot();
   }finally{$("au-go").disabled=false}
@@ -542,13 +550,15 @@ function subscribe(){
 /* ==================== התראות פוש (אפליקציה בלבד) ==================== */
 // השרת שולח התראה דרך Firebase על כל הודעה/הצעה/בקשת שחרור — גם כשהאפליקציה סגורה.
 let pushToken=null,pushP=null,actx=null;
-// צפצוף כפול קצר — כשהאפליקציה פתוחה המערכת לא משמיעה צליל משלה
+// צפצוף חזק (3 פעמים, גל מרובע בעוצמה מלאה) — כשהאפליקציה פתוחה המערכת לא משמיעה צליל משלה
 function beep(){
   try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();actx.resume();
-    [0,.28].forEach(t=>{const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=880;
-      g.gain.setValueAtTime(.0001,actx.currentTime+t);g.gain.exponentialRampToValueAtTime(.5,actx.currentTime+t+.02);
-      g.gain.exponentialRampToValueAtTime(.0001,actx.currentTime+t+.22);o.connect(g).connect(actx.destination);
-      o.start(actx.currentTime+t);o.stop(actx.currentTime+t+.24)})}catch(e){}
+    const t0=actx.currentTime;
+    [0,.4,.8].forEach(s=>[[0,1400],[.22,1050]].forEach(([d,f])=>{const t=t0+s+d,o=actx.createOscillator(),g=actx.createGain();
+      o.type="square";o.frequency.value=f;
+      g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(1,t+.01);
+      g.gain.setValueAtTime(1,t+.15);g.gain.exponentialRampToValueAtTime(.0001,t+.17);
+      o.connect(g).connect(actx.destination);o.start(t);o.stop(t+.18)}))}catch(e){}
 }
 function setupPush(){
   if(!NATIVE||!PN)return Promise.resolve();
@@ -556,9 +566,12 @@ function setupPush(){
 }
 async function initPush(){
   await PN.createChannel({id:"alerts",name:"נסיעות והודעות",importance:5,visibility:1,vibration:true}).catch(()=>{});
+  // ערוץ עם צפצוף חזק משלנו (res/raw/alert.wav) — אנדרואיד לא מאפשר לשנות צליל של ערוץ קיים, לכן ערוץ חדש
+  await PN.createChannel({id:"alerts_loud",name:"נסיעות והודעות (צפצוף חזק)",importance:5,visibility:1,
+    vibration:true,sound:"alert.wav"}).catch(()=>{});
   PN.addListener("registration",async t=>{
     pushToken=t.value;
-    await rpc("register_push_token",{p_token:t.value,p_platform:"android"}).catch(()=>{});
+    await rpc("register_push_token",{p_token:t.value,p_platform:"android2"}).catch(()=>{});
   });
   // כשהאפליקציה פתוחה המערכת לא מציגה את ההתראה — מציגים בעצמנו ומרעידים
   PN.addListener("pushNotificationReceived",n=>{
@@ -837,8 +850,9 @@ async function toggleAvail(){
 }
 async function doAccept(id){try{await rpc("accept_offer",{p_offer:id});toast("הנסיעה שלך! בהצלחה 🚗");
   await loadAll();render()}catch(e){await loadAll();render()}}
-async function doDecline(id){try{await rpc("decline_offer",{p_offer:id});
-  toast("סימנת שאינך יכול","#5b6773","#fff");await loadAll();render()}catch(e){}}
+async function doDecline(id){const bid=(D.offers.find(o=>o.id===id)||{}).target==="bid";
+  try{await rpc("decline_offer",{p_offer:id});
+  toast(bid?"סימנת שאינך יכול":"סימנת שאינך יכול — הנסיעה חזרה למנהל","#5b6773","#fff");await loadAll();render()}catch(e){}}
 async function doPickup(id){try{await rpc("pickup_trip",{p_trip:id});toast("סומן: הלקוח נאסף");
   await loadAll();render()}catch(e){}}
 function doFinish(id){

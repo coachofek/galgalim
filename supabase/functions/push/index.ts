@@ -43,11 +43,11 @@ Deno.serve(async (req) => {
   if (!ok) return new Response("forbidden", { status: 403 });
 
   const { users, title, body, kind } = await req.json();
-  const { data: rows } = await db.from("push_tokens").select("token").in("user_id", users ?? []);
+  const { data: rows } = await db.from("push_tokens").select("*").in("user_id", users ?? []);
   if (!rows?.length) return Response.json({ sent: 0, reason: "no tokens" });
 
   const access = await googleToken();
-  const results = await Promise.all(rows.map(async ({ token }) => {
+  const results = await Promise.all(rows.map(async ({ token, platform }) => {
     const res = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
       method: "POST",
       headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/json" },
@@ -58,7 +58,10 @@ Deno.serve(async (req) => {
           data: { kind: String(kind ?? "") },
           android: {
             priority: "high",
-            notification: { channel_id: "alerts", sound: "default", icon: "ic_stat_wheel", color: "#EAB308" },
+            // גרסת אפליקציה חדשה (platform=android2) יוצרת ערוץ alerts_loud עם צפצוף חזק; גרסה ישנה — הערוץ הרגיל
+            notification: platform === "android2"
+              ? { channel_id: "alerts_loud", sound: "alert", icon: "ic_stat_wheel", color: "#EAB308" }
+              : { channel_id: "alerts", sound: "default", icon: "ic_stat_wheel", color: "#EAB308" },
           },
         },
       }),
