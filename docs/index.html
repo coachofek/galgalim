@@ -1218,23 +1218,24 @@ async function doResetPin(id){
 // כפתור שינוי סטטוס בידי המנהל: פנוי↔עסוק, ונהג בנסיעה — סגירת הנסיעה במקומו
 const stBtn=d=>d.join_pin?"":d.status==="free"?`<button onclick="setStatus('${d.id}','off')">⚪ לעסוק</button>`
   :d.status==="off"?`<button onclick="setStatus('${d.id}','free')">🟢 לפנוי</button>`
-  :`<button onclick="ownerFinish('${d.id}')">🏁 סיים נסיעה</button>`;
+  :`<button onclick="ownerFinish('${d.id}','off')">⚪ לעסוק</button><button onclick="ownerFinish('${d.id}','free')">🟢 לפנוי</button>`;
 async function setStatus(id,st){const d=D.drivers.find(x=>x.id===id);
   try{await rpc("set_driver_status",{p_driver:id,p_status:st});
     toast(`${d.name} עבר למצב ${LBL[st]}`,st==="free"?"#22c55e":"#5b6773",st==="free"?"#04240f":"#fff");
     const open=$("sheet").classList.contains("on");await loadAll();render();if(open)openDriverCard(id)}catch(e){}}
-function ownerFinish(id){
+function ownerFinish(id,nx="off"){
   const d=D.drivers.find(x=>x.id===id),t=D.trips.find(x=>x.status==="active"&&x.driver_id===id);
   if(!t)return err("לא נמצאה נסיעה פעילה לנהג הזה");
-  sheet(`🏁 סיום נסיעה במקום ${esc(d.name)}`,
-    `<div class="priv">${esc(t.from_text)} ← ${esc(t.to_text)}<br>סוכם: <b>${ils(t.agreed_amount)}</b></div>
+  sheet(`${nx==="free"?"🟢":"⚪"} העברת ${esc(d.name)} ל${LBL[nx]}`,
+    `<div class="priv" style="border-color:var(--busy)">🚕 הנהג באמצע נסיעה. כדי להעביר אותו ל${LBL[nx]} — הנסיעה נסגרת ונרשמת בדוחות ובהתחשבנות.</div>
+     <div class="priv">${esc(t.from_text)} ← ${esc(t.to_text)}<br>סוכם: <b>${ils(t.agreed_amount)}</b></div>
      <div class="fld"><label>כמה נגבה בפועל? (₪)</label><input id="of-amt" type="number" value="${t.agreed_amount}"></div>
      <div class="fld"><label>אמצעי תשלום</label><select id="of-pay">${PAY.map(p=>`<option${p===t.pay_method?" selected":""}>${p}</option>`).join("")}</select></div>
      <div class="fld"><label>אחרי הנסיעה הנהג עובר ל־</label><select id="of-next">
-       <option value="off">⚪ עסוק</option><option value="free">🟢 פנוי</option></select></div>
+       <option value="off"${nx==="off"?" selected":""}>⚪ עסוק</option><option value="free"${nx==="free"?" selected":""}>🟢 פנוי</option></select></div>
      <div class="fld"><label>הערה (רשות)</label><input id="of-note" placeholder="לדוגמה: נסגר ע״י המנהל"></div>`,
     `<button class="btn s" onclick="openDriverCard('${id}')">ביטול</button>
-     <button class="btn ok" onclick="submitOwnerFinish('${id}','${t.id}')">סיים נסיעה</button>`);
+     <button class="btn ok" onclick="submitOwnerFinish('${id}','${t.id}')">סגור נסיעה והעבר</button>`);
 }
 async function submitOwnerFinish(id,tripId){
   const amt=+val("of-amt");if(!(amt>=0)||val("of-amt")==="")return err("נא להזין את הסכום שנגבה");
