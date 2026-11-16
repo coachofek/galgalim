@@ -1032,7 +1032,7 @@ function renderOwner(){
             :isStale(d)?`<span class="stale-n">⚠ ${agoTxt(d)}</span>`:d.lat?"📍 מיקום מעודכן":"⚪ אין מיקום"}</div></div>
         <div class="rowact" onclick="event.stopPropagation()">
           <span class="badge ${d.status}">${LBL[d.status]}</span>
-          ${d.status==="free"?`<button onclick="setOff('${d.id}')">⚪ לעסוק</button>`:""}
+          ${stBtn(d)}
           ${isStale(d)&&!d.join_pin?`<button onclick="askLoc('${d.id}')">📍 בקש מיקום</button>`:""}</div></div>`).join("")
         ||`<div class="empty">אין עדיין נהגים.<br>לחץ "➕ הוסף נהג" כדי להתחיל.</div>`}
       ${D.allDrivers.some(d=>d.active===false&&!d.deleted_at)?`<div class="card" style="margin-top:14px"><h4>🚫 נהגים מושבתים — ההיסטוריה שלהם נשמרת</h4>
@@ -1128,7 +1128,7 @@ function openDriverCard(id,tab="info"){
     <tr><td class="mut">סוג רכב</td><td>${esc(d.vehicle_type||"—")}</td></tr>
     <tr><td class="mut">טלפון</td><td>${esc(d.phone||"—")}</td></tr>
     <tr><td class="mut">בסיס</td><td>${esc(d.base_area||"—")}</td></tr>
-    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${!off&&d.status==="free"?` <button class="btn s sm" style="margin-inline-start:8px;padding:4px 10px" onclick="setOff('${id}')">⚪ העבר לעסוק</button>`:""}${!off&&d.status==="busy"?`<br><span class="mut" style="font-size:11px">בסיום הנסיעה יעבור לעסוק אוטומטית</span>`:""}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>${d.join_pin?"":` <button class="btn s sm" style="padding:3px 9px;margin-top:4px" onclick="askLoc('${id}')">📍 בקש מיקום</button>`}`:""}</td></tr>
+    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${off?"":`<span class="rowact" style="display:inline-flex;margin-inline-start:8px">${stBtn(d)}</span>`}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>${d.join_pin?"":` <button class="btn s sm" style="padding:3px 9px;margin-top:4px" onclick="askLoc('${id}')">📍 בקש מיקום</button>`}`:""}</td></tr>
     <tr><td class="mut">נראה לאחרונה</td><td>${d.last_seen?dt(d.last_seen).toLocaleString("he-IL"):"—"}</td></tr>
     <tr><td class="mut">סה״כ נסיעות</td><td id="dc-cnt">…</td></tr>
     <tr><td class="mut">סה״כ גבייה</td><td class="money" id="dc-sum">…</td></tr>
@@ -1215,9 +1215,32 @@ async function doResetPin(id){
       `<button class="btn p" onclick="closeSheet()">סגור</button>`);
     await loadAll();render()}catch(e){}
 }
-async function setOff(id){const d=D.drivers.find(x=>x.id===id);
-  try{await rpc("set_driver_off",{p_driver:id});toast(`${d.name} עבר למצב עסוק`,"#5b6773","#fff");
+// כפתור שינוי סטטוס בידי המנהל: פנוי↔עסוק, ונהג בנסיעה — סגירת הנסיעה במקומו
+const stBtn=d=>d.join_pin?"":d.status==="free"?`<button onclick="setStatus('${d.id}','off')">⚪ לעסוק</button>`
+  :d.status==="off"?`<button onclick="setStatus('${d.id}','free')">🟢 לפנוי</button>`
+  :`<button onclick="ownerFinish('${d.id}')">🏁 סיים נסיעה</button>`;
+async function setStatus(id,st){const d=D.drivers.find(x=>x.id===id);
+  try{await rpc("set_driver_status",{p_driver:id,p_status:st});
+    toast(`${d.name} עבר למצב ${LBL[st]}`,st==="free"?"#22c55e":"#5b6773",st==="free"?"#04240f":"#fff");
     const open=$("sheet").classList.contains("on");await loadAll();render();if(open)openDriverCard(id)}catch(e){}}
+function ownerFinish(id){
+  const d=D.drivers.find(x=>x.id===id),t=D.trips.find(x=>x.status==="active"&&x.driver_id===id);
+  if(!t)return err("לא נמצאה נסיעה פעילה לנהג הזה");
+  sheet(`🏁 סיום נסיעה במקום ${esc(d.name)}`,
+    `<div class="priv">${esc(t.from_text)} ← ${esc(t.to_text)}<br>סוכם: <b>${ils(t.agreed_amount)}</b></div>
+     <div class="fld"><label>כמה נגבה בפועל? (₪)</label><input id="of-amt" type="number" value="${t.agreed_amount}"></div>
+     <div class="fld"><label>אמצעי תשלום</label><select id="of-pay">${PAY.map(p=>`<option${p===t.pay_method?" selected":""}>${p}</option>`).join("")}</select></div>
+     <div class="fld"><label>אחרי הנסיעה הנהג עובר ל־</label><select id="of-next">
+       <option value="off">⚪ עסוק</option><option value="free">🟢 פנוי</option></select></div>
+     <div class="fld"><label>הערה (רשות)</label><input id="of-note" placeholder="לדוגמה: נסגר ע״י המנהל"></div>`,
+    `<button class="btn s" onclick="openDriverCard('${id}')">ביטול</button>
+     <button class="btn ok" onclick="submitOwnerFinish('${id}','${t.id}')">סיים נסיעה</button>`);
+}
+async function submitOwnerFinish(id,tripId){
+  const amt=+val("of-amt");if(!(amt>=0)||val("of-amt")==="")return err("נא להזין את הסכום שנגבה");
+  const nx=val("of-next");
+  try{await rpc("owner_finish_trip",{p_trip:tripId,p_collected:amt,p_pay:val("of-pay"),p_next:nx,p_note:val("of-note")||null});
+    closeSheet();toast(`הנסיעה נסגרה · ${ils(amt)} · הנהג ${LBL[nx]}`);await loadAll();render()}catch(e){}}
 async function askLoc(id){const d=D.drivers.find(x=>x.id===id);
   try{await rpc("request_location",{p_driver:id});
     toast(`נשלחה התראה ל${d.name} — כשיפתח אותה המיקום יתעדכן`,"#3b82f6","#fff")}catch(e){}}
