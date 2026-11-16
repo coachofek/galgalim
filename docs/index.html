@@ -133,6 +133,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .mapbar button,.chips button{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);
  white-space:nowrap;padding:6px 12px;border-radius:999px;font-size:12px;font-family:inherit;cursor:pointer}
 .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:9px}.chips button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.rowact{display:flex;flex-direction:column;align-items:center;gap:5px}
+.rowact button{background:var(--panel-2);border:1px solid var(--line);color:var(--txt,#e5e7eb);border-radius:9px;
+  padding:4px 8px;font-size:11px;font-family:inherit;white-space:nowrap;cursor:pointer}
 .drow{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);
  border-radius:12px;padding:10px 12px;margin-bottom:8px}
 .drow .av{width:36px;height:36px;border-radius:50%;background:var(--panel-2);border:2px solid var(--line);
@@ -1027,7 +1030,10 @@ function renderOwner(){
           <div class="n2">🚗 ${esc(d.vehicle_type||"—")} · ${esc(d.plate||"—")}</div>
           <div class="n3">${d.join_pin?`🔑 קוד חיבור: ${d.join_pin} — טרם התחבר`
             :isStale(d)?`<span class="stale-n">⚠ ${agoTxt(d)}</span>`:d.lat?"📍 מיקום מעודכן":"⚪ אין מיקום"}</div></div>
-        <span class="badge ${d.status}">${LBL[d.status]}</span></div>`).join("")
+        <div class="rowact" onclick="event.stopPropagation()">
+          <span class="badge ${d.status}">${LBL[d.status]}</span>
+          ${d.status==="free"?`<button onclick="setOff('${d.id}')">⚪ לעסוק</button>`:""}
+          ${isStale(d)&&!d.join_pin?`<button onclick="askLoc('${d.id}')">📍 בקש מיקום</button>`:""}</div></div>`).join("")
         ||`<div class="empty">אין עדיין נהגים.<br>לחץ "➕ הוסף נהג" כדי להתחיל.</div>`}
       ${D.allDrivers.some(d=>d.active===false&&!d.deleted_at)?`<div class="card" style="margin-top:14px"><h4>🚫 נהגים מושבתים — ההיסטוריה שלהם נשמרת</h4>
         ${D.allDrivers.filter(d=>d.active===false&&!d.deleted_at).map(d=>`<div class="drow" style="opacity:.6" onclick="openDriverCard('${d.id}')">
@@ -1122,7 +1128,7 @@ function openDriverCard(id,tab="info"){
     <tr><td class="mut">סוג רכב</td><td>${esc(d.vehicle_type||"—")}</td></tr>
     <tr><td class="mut">טלפון</td><td>${esc(d.phone||"—")}</td></tr>
     <tr><td class="mut">בסיס</td><td>${esc(d.base_area||"—")}</td></tr>
-    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${!off&&d.status==="free"?` <button class="btn s sm" style="margin-inline-start:8px;padding:4px 10px" onclick="setOff('${id}')">⚪ העבר לעסוק</button>`:""}${!off&&d.status==="busy"?`<br><span class="mut" style="font-size:11px">בסיום הנסיעה יעבור לעסוק אוטומטית</span>`:""}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>`:""}</td></tr>
+    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${!off&&d.status==="free"?` <button class="btn s sm" style="margin-inline-start:8px;padding:4px 10px" onclick="setOff('${id}')">⚪ העבר לעסוק</button>`:""}${!off&&d.status==="busy"?`<br><span class="mut" style="font-size:11px">בסיום הנסיעה יעבור לעסוק אוטומטית</span>`:""}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>${d.join_pin?"":` <button class="btn s sm" style="padding:3px 9px;margin-top:4px" onclick="askLoc('${id}')">📍 בקש מיקום</button>`}`:""}</td></tr>
     <tr><td class="mut">נראה לאחרונה</td><td>${d.last_seen?dt(d.last_seen).toLocaleString("he-IL"):"—"}</td></tr>
     <tr><td class="mut">סה״כ נסיעות</td><td id="dc-cnt">…</td></tr>
     <tr><td class="mut">סה״כ גבייה</td><td class="money" id="dc-sum">…</td></tr>
@@ -1211,7 +1217,10 @@ async function doResetPin(id){
 }
 async function setOff(id){const d=D.drivers.find(x=>x.id===id);
   try{await rpc("set_driver_off",{p_driver:id});toast(`${d.name} עבר למצב עסוק`,"#5b6773","#fff");
-    await loadAll();render();openDriverCard(id)}catch(e){}}
+    const open=$("sheet").classList.contains("on");await loadAll();render();if(open)openDriverCard(id)}catch(e){}}
+async function askLoc(id){const d=D.drivers.find(x=>x.id===id);
+  try{await rpc("request_location",{p_driver:id});
+    toast(`נשלחה התראה ל${d.name} — כשיפתח אותה המיקום יתעדכן`,"#3b82f6","#fff")}catch(e){}}
 // השבתה במקום מחיקה: כל ההיסטוריה נשמרת, ואפשר להחזיר בלחיצה
 async function setActive(id,on){
   const d=D.allDrivers.find(x=>x.id===id);
