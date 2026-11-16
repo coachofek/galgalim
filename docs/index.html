@@ -329,7 +329,7 @@ const NATIVE=!!(window.Capacitor&&Capacitor.isNativePlatform&&Capacitor.isNative
 const plugin=n=>{try{return Capacitor.registerPlugin?Capacitor.registerPlugin(n):(Capacitor.Plugins||{})[n]||null}catch(e){console.error("plugin",n,e);return null}};
 const BG=NATIVE?plugin("BackgroundGeolocation"):null;
 const PN=NATIVE?plugin("PushNotifications"):null;
-let bgWatcher=null,lastLoc=null;
+let bgWatcher=null,webWatch=null,lastLoc=null;
 
 /* ==================== עזרים ==================== */
 const $=id=>document.getElementById(id);
@@ -710,6 +710,24 @@ async function sendLocNative(lat,lng){
     data:{lat,lng,last_seen:new Date().toISOString()}}).catch(()=>{});
 }
 
+// מיקום טרי עכשיו (לחיצה על פנוי/עסוק, פתיחת האפליקציה) — לא מחכים למעקב הרקע
+function freshLoc(){return new Promise(res=>{
+  if(!navigator.geolocation)return res(null);
+  navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude}),
+    ()=>res(null),{enableHighAccuracy:true,maximumAge:0,timeout:12000})})}
+async function pushFreshLoc(){
+  if(!me||me.role!=="driver")return;
+  const p=await freshLoc();if(!p)return;
+  lastLoc={t:Date.now(),latitude:p.lat,longitude:p.lng};
+  await db.from("drivers").update({lat:p.lat,lng:p.lng,last_seen:new Date().toISOString()}).eq("id",me.driver.id);
+}
+// כשהנהג חוזר לאפליקציה: שולחים מיקום מיד, ואם המעקב ברקע נעצר — מפעילים מחדש
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState!=="visible"||!me||me.role!=="driver")return;
+  pushFreshLoc().then(()=>loadAll()).then(render).catch(()=>{});
+  startGps().catch(()=>{});
+});
+
 async function startGps(){
   if(NATIVE&&BG){
     if(bgWatcher)return;
@@ -732,8 +750,8 @@ async function startGps(){
     });
     return;
   }
-  if(!navigator.geolocation)return;
-  navigator.geolocation.watchPosition(async p=>{
+  if(!navigator.geolocation||webWatch!=null)return;
+  webWatch=navigator.geolocation.watchPosition(async p=>{
     if(!me||me.role!=="driver")return;
     await db.from("drivers").update({lat:p.coords.latitude,lng:p.coords.longitude,
       last_seen:new Date().toISOString()}).eq("id",me.driver.id);
@@ -774,7 +792,7 @@ function renderDriver(){
       <div class="lamp ${d.status}">${d.status==="free"?"🟢":d.status==="busy"?"🚕":"⚪"}</div>
       <div class="st">${d.status==="free"?"אתה פנוי":d.status==="busy"?"אתה בנסיעה":"אתה עסוק"}</div>
       <div class="ex">${d.status==="free"?"אתה מקבל הצעות נסיעה והמנהל רואה אותך במפה"
-        :d.status==="busy"?"סיים את הנסיעה הנוכחית כדי לקבל הצעות חדשות"
+        :d.status==="busy"?"בסיום הנסיעה תעבור למצב עסוק — לחץ 'חזור למצב פנוי' כשאתה זמין"
         :"מכרזים עדיין מגיעים אליך — אפשר לקחת אם מתאים"}</div>
       ${d.status!=="busy"?`<button class="btn ${d.status==="free"?"s":"ok"}" onclick="toggleAvail()">
         ${d.status==="free"?"עבור למצב עסוק":"חזור למצב פנוי"}</button>`:""}
@@ -843,7 +861,11 @@ async function markRead(list){
 function navTo(dest){window.open("https://waze.com/ul?q="+encodeURIComponent(dest),"_blank")}
 async function toggleAvail(){
   const s=me.driver.status==="free"?"off":"free";
-  const{error}=await db.from("drivers").update({status:s}).eq("id",me.driver.id);
+  // יחד עם הסטטוס — מיקום עדכני, כדי שהמנהל יראה איפה הנהג באמת נמצא
+  toast("מעדכן מיקום…","#5b6773","#fff");
+  const p=await freshLoc(),row={status:s};
+  if(p)Object.assign(row,{lat:p.lat,lng:p.lng,last_seen:new Date().toISOString()});
+  const{error}=await db.from("drivers").update(row).eq("id",me.driver.id);
   if(error)return err(error.message);
   toast(s==="off"?"עברת למצב עסוק":"חזרת למצב פנוי",s==="off"?"#5b6773":"#22c55e",s==="off"?"#fff":"#04240f");
   await loadAll();render();
@@ -869,7 +891,7 @@ function doFinish(id){
 async function submitFinish(id){
   const amt=+val("f-amt")||0;if(!amt)return err("נא להזין את הסכום שנגבה");
   try{await rpc("finish_trip",{p_trip:id,p_collected:amt,p_pay:val("f-pay"),p_note:val("f-note")||null});
-    closeSheet();toast(`הנסיעה הסתיימה · דווחו ${ils(amt)}`);await loadAll();render()}catch(e){}
+    closeSheet();toast(`הנסיעה הסתיימה · דווחו ${ils(amt)} · אתה במצב עסוק`);await loadAll();render()}catch(e){}
 }
 function askRelease(id){
   sheet("🆘 בקשת שחרור מנסיעה",
@@ -1100,7 +1122,7 @@ function openDriverCard(id,tab="info"){
     <tr><td class="mut">סוג רכב</td><td>${esc(d.vehicle_type||"—")}</td></tr>
     <tr><td class="mut">טלפון</td><td>${esc(d.phone||"—")}</td></tr>
     <tr><td class="mut">בסיס</td><td>${esc(d.base_area||"—")}</td></tr>
-    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>`:""}</td></tr>
+    <tr><td class="mut">סטטוס</td><td>${off?"🚫 מושבת":LBL[d.status]}${!off&&d.status==="free"?` <button class="btn s sm" style="margin-inline-start:8px;padding:4px 10px" onclick="setOff('${id}')">⚪ העבר לעסוק</button>`:""}${!off&&d.status==="busy"?`<br><span class="mut" style="font-size:11px">בסיום הנסיעה יעבור לעסוק אוטומטית</span>`:""}${isStale(d)?`<br><span class="stale-n" style="font-size:11px">⚠ ${agoTxt(d)}</span>`:""}</td></tr>
     <tr><td class="mut">נראה לאחרונה</td><td>${d.last_seen?dt(d.last_seen).toLocaleString("he-IL"):"—"}</td></tr>
     <tr><td class="mut">סה״כ נסיעות</td><td id="dc-cnt">…</td></tr>
     <tr><td class="mut">סה״כ גבייה</td><td class="money" id="dc-sum">…</td></tr>
@@ -1187,6 +1209,9 @@ async function doResetPin(id){
       `<button class="btn p" onclick="closeSheet()">סגור</button>`);
     await loadAll();render()}catch(e){}
 }
+async function setOff(id){const d=D.drivers.find(x=>x.id===id);
+  try{await rpc("set_driver_off",{p_driver:id});toast(`${d.name} עבר למצב עסוק`,"#5b6773","#fff");
+    await loadAll();render();openDriverCard(id)}catch(e){}}
 // השבתה במקום מחיקה: כל ההיסטוריה נשמרת, ואפשר להחזיר בלחיצה
 async function setActive(id,on){
   const d=D.allDrivers.find(x=>x.id===id);
